@@ -3,6 +3,7 @@
 import { notFound } from "next/navigation";
 import connectDB from "@/lib/mongoose";
 import FolderShare from "@/models/Foldershare";
+import FolderShareActions from "./FolderShareActions";
 
 type ShareFile = {
   fileId:      string;
@@ -17,6 +18,7 @@ type ShareDoc = {
   token:      string;
   folderName: string;
   owner_id:   string;
+  permission: "read" | "add";
   files:      ShareFile[];
   expiresAt:  Date;
   createdAt:  Date;
@@ -43,13 +45,15 @@ function getFileIcon(mimetype: string): string {
 export default async function FolderSharePage({
   params,
 }: {
-  params: { token: string };
+  params: Promise<{ token: string }>;
 }) {
   // Ensure Mongoose is connected before querying the model
   await connectDB();
 
+  const { token } = await params;
+
   const share = (await FolderShare.findOne({
-    token:     params.token,
+    token,
     expiresAt: { $gt: new Date() },
   }).lean()) as ShareDoc | null;
 
@@ -115,6 +119,24 @@ export default async function FolderSharePage({
           border-top: 1px solid #1a1e28; padding-top: 24px;
         }
         .empty { text-align: center; padding: 48px 0; color: #6b7280; font-size: 0.9rem; }
+        .share-add-panel {
+          background: #13161e; border: 1px solid #2f6f5f; border-radius: 14px;
+          padding: 16px; display: flex; flex-direction: column; gap: 14px; margin-bottom: 22px;
+        }
+        .share-add-title { font-size: 0.9rem; font-weight: 700; color: #34d399; }
+        .share-add-sub { font-size: 0.78rem; color: #9ca3af; margin-top: 3px; }
+        .share-add-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+        .share-add-btn, .share-folder-form button {
+          background: rgba(52,211,153,0.12); border: 1px solid rgba(52,211,153,0.35);
+          color: #34d399; border-radius: 8px; padding: 8px 12px; font-size: 0.78rem;
+          cursor: pointer; font-weight: 600;
+        }
+        .share-folder-form { display: flex; gap: 8px; flex: 1; min-width: 240px; }
+        .share-folder-form input {
+          flex: 1; background: #1a1e28; border: 1px solid #252a38; color: #e8eaf0;
+          border-radius: 8px; padding: 8px 10px; min-width: 0;
+        }
+        .share-add-message { font-size: 0.78rem; color: #fbbf24; }
       `}</style>
 
       <div className="page">
@@ -127,6 +149,8 @@ export default async function FolderSharePage({
           {" · "}
           Expires {expiresDate}
         </p>
+
+        <FolderShareActions token={share.token} canAdd={share.permission === "add"} />
 
         {share.files.length === 0 ? (
           <div className="empty">This folder is empty.</div>

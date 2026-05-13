@@ -8,7 +8,7 @@ import { useSession } from "next-auth/react";
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 const CHUNK_SIZE = 10 * 1024 * 1024;
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 type UploadStatus = "idle" | "uploading" | "success" | "error" | "duplicate";
 
 type FileType = {
@@ -40,13 +40,22 @@ type ContextMenu = {
 
 type DeleteTarget = { type: "file"; item: FileType } | { type: "folder"; item: FolderType };
 type ToastMsg = { msg: string; type: "error" | "warn" | "success" };
+type SearchResult = FileType & { matchedContent?: boolean; snippet?: string };
+type VersionInfo = {
+  id: string;
+  version: number;
+  uploadedAt: string;
+  storageUrl: string;
+  isCurrent: boolean;
+};
+type ShareTarget = { type: "file"; item: FileType } | { type: "folder"; item: FolderType };
 type UploadError = Error & {
   isCancelled?: boolean;
   isDuplicate?: boolean;
   existingFile?: FileType;
 };
 
-// ── Utils ────────────────────────────────────────────────────────────────────
+// ── Utils ─────────────────────────────────────────────────────────────────────
 async function getFileHash(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
   const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
@@ -63,17 +72,17 @@ function formatBytes(bytes: number): string {
 }
 
 function getFileIcon(mimetype: string): string {
-  if (mimetype.startsWith("image/")) return "🖼";
+  if (mimetype.startsWith("image/")) return "🖼️";
   if (mimetype.startsWith("video/")) return "🎬";
   if (mimetype.startsWith("audio/")) return "🎵";
   if (mimetype.includes("pdf")) return "📄";
-  if (mimetype.includes("zip") || mimetype.includes("compressed")) return "🗜";
+  if (mimetype.includes("zip") || mimetype.includes("compressed")) return "🗜️";
   if (mimetype.includes("word") || mimetype.includes("document")) return "📝";
   if (mimetype.includes("sheet") || mimetype.includes("excel")) return "📊";
   return "📁";
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+// ── Component ─────────────────────────────────────────────────────────────────
 export default function FileUpload() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -92,14 +101,22 @@ export default function FileUpload() {
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [showNewFolder, setShowNewFolder] = useState(false);
+  const [moveNewFolderName, setMoveNewFolderName] = useState("");
 
   // Context menu & modals
   const [ctxMenu, setCtxMenu] = useState<ContextMenu | null>(null);
   const [moveTarget, setMoveTarget] = useState<FileType | null>(null);
   const [moveFolderTarget, setMoveFolderTarget] = useState<FolderType | null>(null);
-  const [shareTarget, setShareTarget] = useState<FileType | null>(null);
+  const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
   const [shareUrl, setShareUrl] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
+  const [sharePermission, setSharePermission] = useState<"read" | "add">("read");
+  const [shareExpiresInDays, setShareExpiresInDays] = useState(7);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [versionTarget, setVersionTarget] = useState<FileType | null>(null);
+  const [versions, setVersions] = useState<VersionInfo[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -123,7 +140,33 @@ export default function FileUpload() {
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, []);
-  // ── Queries ──────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!isAuthenticated || searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery.trim())}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error("Search failed");
+        const data = await res.json();
+        setSearchResults(data.results ?? []);
+      } catch (error) {
+        if ((error as Error).name !== "AbortError") setSearchResults([]);
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [isAuthenticated, searchQuery]);
+  // ── Queries ───────────────────────────────────────────────────────────────────
   const { data: files = [], isLoading: filesLoading } = useQuery<FileType[]>({
     queryKey: ["files"],
     queryFn: async () => {
@@ -153,35 +196,29 @@ export default function FileUpload() {
     return new Error(data.error || fallback);
   }
 
-  // ── Small upload ─────────────────────────────────────────────────────────
+  // ── Small upload ──────────────────────────────────────────────────────────────
   const smallUploadMutation = useMutation({
     mutationFn: async ({ file, hash }: { file: File; hash: string }) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("hash", hash);
+      if (currentFolderId) formData.append("folderId", currentFolderId);
+
       const res = await fetch("/api/files/upload", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: file.name, mimeType: file.type, size: file.size, folderId: currentFolderId, hash }),
+        body: formData,
       });
       if (cancelRef.current) throw { isCancelled: true };
       if (res.status === 409) { const d = await res.json(); throw { isDuplicate: true, existingFile: d.existingFile }; }
       if (res.status === 413) throw new Error("File exceeds 10 MB");
       if (res.status === 401) throw new Error("Session expired, please log in again");
       if (!res.ok) throw await parseError(res, `Upload failed (${res.status})`);
-      const { uploadUrl, fileId } = await res.json();
-      if (cancelRef.current) throw { isCancelled: true };
-      const putRes = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
-      if (!putRes.ok) throw new Error("Failed to upload file to storage");
-      if (cancelRef.current) throw { isCancelled: true };
-      const confirmRes = await fetch("/api/files/confirm", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileId }),
-      });
-      if (!confirmRes.ok) throw new Error("Failed to confirm upload");
-      return confirmRes.json();
+      return res.json();
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["files"] }),
   });
 
-  // ── Multipart upload ─────────────────────────────────────────────────────
+  // ── Multipart upload ──────────────────────────────────────────────────────────
   async function multipartUpload(file: File, hash: string, onProgress: (pct: number) => void) {
     const initRes = await fetch("/api/files/upload/multipart/init", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -236,7 +273,7 @@ export default function FileUpload() {
     return (await res.json()).url;
   };
 
-  // ── File actions ─────────────────────────────────────────────────────────
+  // ── File actions ──────────────────────────────────────────────────────────────
   const downloadFile = async (file: FileType) => {
     try {
       const url = await getFileUrl(file.storageUrl);
@@ -263,7 +300,7 @@ export default function FileUpload() {
   };
 
   const openShareModal = async (file: FileType) => {
-    setShareTarget(file); setShareUrl(""); setShareCopied(false);
+    setShareTarget({ type: "file", item: file }); setShareUrl(""); setShareCopied(false);
     try {
       const res = await fetch(`/api/files/${file._id}/share`, { method: "POST" });
       if (!res.ok) throw new Error("Failed");
@@ -273,6 +310,63 @@ export default function FileUpload() {
       setToast({ msg: "Could not generate share link.", type: "error" });
       setShareTarget(null);
     }
+  };
+
+  const openFolderShareModal = async (folder: FolderType, permission: "read" | "add" = "read") => {
+    setShareTarget({ type: "folder", item: folder });
+    setShareUrl("");
+    setShareCopied(false);
+    setSharePermission(permission);
+    try {
+      const res = await fetch(`/api/folders/${folder._id}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ permission, expiresInDays: shareExpiresInDays }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const { shareUrl: url } = await res.json();
+      setShareUrl(url);
+    } catch {
+      setToast({ msg: "Could not generate folder share link.", type: "error" });
+      setShareTarget(null);
+    }
+  };
+
+  const refreshFolderShare = () => {
+    if (shareTarget?.type !== "folder") return;
+    openFolderShareModal(shareTarget.item, sharePermission);
+  };
+
+  const openVersions = async (file: FileType) => {
+    setVersionTarget(file);
+    setVersions([]);
+    setVersionsLoading(true);
+    try {
+      const res = await fetch(`/api/files/${file._id}/versions`);
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
+      setVersions(data.versions ?? []);
+    } catch {
+      setToast({ msg: "Could not load version history.", type: "error" });
+      setVersionTarget(null);
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
+  const openVersionUrl = async (version: VersionInfo) => {
+    if (!versionTarget) return;
+    const res = await fetch(`/api/files/${versionTarget._id}/versions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ storageUrl: version.storageUrl }),
+    });
+    if (!res.ok) {
+      setToast({ msg: "Could not open that version.", type: "error" });
+      return;
+    }
+    const { url } = await res.json();
+    window.open(url, "_blank");
   };
 
   const copyShareUrl = () => {
@@ -293,6 +387,28 @@ export default function FileUpload() {
       setMoveTarget(null);
       setToast({ msg: `Moved to ${targetFolderId ? folders.find(f => f._id === targetFolderId)?.name : "root"}.`, type: "success" });
     } catch { setToast({ msg: "Move failed.", type: "error" }); }
+  };
+
+  const createFolderAndMoveFile = async () => {
+    const name = moveNewFolderName.trim();
+    if (!name || !moveTarget) return;
+
+    try {
+      const res = await fetch("/api/folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, parent_id: null }),
+      });
+      const folder = await res.json();
+      if (!res.ok) throw new Error(folder.error || "Failed");
+
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
+      setMoveNewFolderName("");
+      await moveFile(moveTarget, folder._id);
+      setToast({ msg: `Created "${name}" and moved the file there.`, type: "success" });
+    } catch {
+      setToast({ msg: "Could not create folder for move.", type: "error" });
+    }
   };
 
   const moveFolder = async (folder: FolderType, targetFolderId: string | null) => {
@@ -343,7 +459,7 @@ export default function FileUpload() {
     } catch { setToast({ msg: "Could not create folder.", type: "error" }); }
   };
 
-  // ── Upload flow ──────────────────────────────────────────────────────────
+  // ── Upload flow ───────────────────────────────────────────────────────────────
   const handleCancel = () => {
     cancelRef.current = true;
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -403,7 +519,7 @@ export default function FileUpload() {
 
   const currentFolder = folders.find((f) => f._id === currentFolderId);
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <>
       <style>{`
@@ -493,7 +609,30 @@ export default function FileUpload() {
         .fu-btn-pill.accent:hover { background: rgba(108,142,255,0.25); }
 
         /* ── Main content ── */
-        .fu-content { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+        .fu-shell { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 20px; align-items: start; }
+        .fu-content { max-width: 900px; width: 100%; display: flex; flex-direction: column; gap: 24px; }
+        .fu-insights {
+          background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+          padding: 16px; position: sticky; top: 24px; display: flex; flex-direction: column; gap: 16px;
+        }
+        .fu-insight-title { font-family: 'Syne', sans-serif; font-size: 0.92rem; font-weight: 700; color: var(--text); }
+        .fu-search-input {
+          width: 100%; background: var(--surface2); border: 1px solid var(--border);
+          border-radius: 10px; padding: 10px 12px; color: var(--text);
+          font-family: 'DM Sans', sans-serif; font-size: 0.82rem; outline: none;
+        }
+        .fu-search-input:focus { border-color: rgba(108,142,255,0.45); }
+        .fu-search-result {
+          border: 1px solid var(--border); background: rgba(255,255,255,0.02);
+          border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 5px;
+        }
+        .fu-search-result button { align-self: flex-start; }
+        .fu-search-name { font-size: 0.8rem; font-weight: 600; color: var(--text); }
+        .fu-search-snippet { font-size: 0.7rem; color: var(--text-muted); line-height: 1.45; }
+        .fu-trust-card { border: 1px solid var(--border); border-radius: 10px; padding: 11px; background: var(--surface2); }
+        .fu-trust-label { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 4px; }
+        .fu-trust-value { font-size: 0.88rem; color: var(--text); font-weight: 700; }
+        @media (max-width: 1050px) { .fu-shell { grid-template-columns: 1fr; } .fu-insights { position: static; } }
 
         /* Header */
         .fu-header-sub { color: var(--text-muted); font-size: 0.85rem; font-weight: 300; margin-top: 4px; }
@@ -693,6 +832,21 @@ export default function FileUpload() {
         }
         .fu-picker-item:hover { background: var(--surface2); border-color: var(--border); color: var(--text); }
         .fu-picker-item.active { background: var(--accent-glow); border-color: rgba(108,142,255,0.25); color: var(--accent); }
+        .fu-move-create {
+          display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px;
+          border: 1px dashed rgba(108,142,255,0.35); border-radius: 10px;
+          padding: 8px; background: rgba(108,142,255,0.06);
+        }
+        .fu-move-create input {
+          min-width: 0; background: var(--surface2); border: 1px solid var(--border);
+          color: var(--text); border-radius: 8px; padding: 8px 10px;
+          font-family: 'DM Sans', sans-serif; font-size: 0.8rem; outline: none;
+        }
+        .fu-move-create button {
+          background: var(--accent-glow); border: 1px solid rgba(108,142,255,0.35);
+          color: var(--accent); border-radius: 8px; padding: 8px 10px;
+          font-family: 'DM Sans', sans-serif; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+        }
 
         /* ── Toast ── */
         .fu-toast {
@@ -724,7 +878,7 @@ export default function FileUpload() {
           <div className="fu-topbar-brand">Storage</div>
           <div className="fu-topbar-actions">
             <button className="fu-topbar-btn accent" onClick={() => router.push("/sidebar")}>
-              🗂 Browse by type
+              Browse by type
             </button>
           </div>
         </div>
@@ -735,12 +889,12 @@ export default function FileUpload() {
             className={`fu-tab ${currentFolderId === null ? "active" : ""}`}
             onClick={() => setCurrentFolderId(null)}
           >
-            🏠 All files
+            All files
             <span className="fu-tab-count">{uploadedFiles.filter(f => f.folderId === null).length}</span>
           </button>
 
           {foldersLoading ? (
-            <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", padding: "0 8px" }}>Loading…</span>
+            <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", padding: "0 8px" }}>Loading</span>
           ) : (
             folders.map((folder) => (
               <button
@@ -749,7 +903,7 @@ export default function FileUpload() {
                 onClick={() => setCurrentFolderId(folder._id)}
                 onContextMenu={(e) => openCtx(e, folder, "folder")}
               >
-                📁 {folder.name}
+                {folder.name}
                 <span className="fu-tab-count">{uploadedFiles.filter(f => f.folderId === folder._id).length}</span>
               </button>
             ))
@@ -759,7 +913,7 @@ export default function FileUpload() {
             <div className="fu-new-folder-inline">
               <input
                 className="fu-new-folder-input-inline"
-                placeholder="Folder name…"
+                placeholder="Folder name"
                 value={newFolderName}
                 onChange={(e) => setNewFolderName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") createFolder(); if (e.key === "Escape") setShowNewFolder(false); }}
@@ -774,6 +928,7 @@ export default function FileUpload() {
         </div>
 
         {/* ── Main content ── */}
+        <div className="fu-shell">
         <div className="fu-content">
 
           {/* Header */}
@@ -788,12 +943,18 @@ export default function FileUpload() {
                 <button className="fu-action-btn" onClick={() => downloadFolder(currentFolder)}>
                   ⬇ Download folder
                 </button>
+                <button className="fu-action-btn" onClick={() => openFolderShareModal(currentFolder, "read")}>
+                  Share read link
+                </button>
+                <button className="fu-action-btn" onClick={() => openFolderShareModal(currentFolder, "add")}>
+                  Share add link
+                </button>
                 <button
                   className="fu-action-btn"
                   style={{ color: "var(--error)", borderColor: "rgba(248,113,113,0.25)" }}
                   onClick={() => setDeleteTarget({ type: "folder", item: currentFolder })}
                 >
-                  🗑 Delete folder
+                  Delete folder
                 </button>
               </div>
             )}
@@ -816,14 +977,14 @@ export default function FileUpload() {
                   Drop your file here{currentFolder ? ` into "${currentFolder.name}"` : ""}
                 </div>
                 <div className="fu-dropzone-sub">
-                  or <span>browse</span> · under 10 MB uploads instantly, larger files use multipart
+                  or <span>browse</span> — under 10 MB uploads instantly, larger files use multipart
                 </div>
               </>
             )}
             {status === "uploading" && (
               <div className="fu-progress-wrap" onClick={(e) => e.stopPropagation()}>
                 <div className="fu-progress-row">
-                  <span className="fu-progress-label">Uploading…</span>
+                  <span className="fu-progress-label">Uploading</span>
                   <span className="fu-progress-pct">{progress}%</span>
                 </div>
                 <div className="fu-bar-bg"><div className="fu-bar-fill" style={{ width: `${progress}%` }} /></div>
@@ -920,6 +1081,7 @@ export default function FileUpload() {
                       Open ↗
                     </button>
                     <button className="fu-icon-btn share" onClick={() => openShareModal(file)}>Share</button>
+                    <button className="fu-icon-btn" onClick={() => openVersions(file)}>Versions</button>
                     <button className="fu-icon-btn" onClick={() => downloadFile(file)}>⬇</button>
 
                     {/* Three-dot menu */}
@@ -929,7 +1091,7 @@ export default function FileUpload() {
                         style={openMenuId === file._id ? { borderColor: "var(--border-hover)", color: "var(--text)" } : {}}
                         onClick={() => setOpenMenuId(openMenuId === file._id ? null : file._id)}
                       >
-                        ···
+                        ⋯
                       </button>
 
                       {openMenuId === file._id && (
@@ -945,7 +1107,11 @@ export default function FileUpload() {
                           </button>
                           <button className="fu-ctx-item"
                             onClick={() => { openShareModal(file); setOpenMenuId(null); }}>
-                            🔗 Share
+                            Share
+                          </button>
+                          <button className="fu-ctx-item"
+                            onClick={() => { openVersions(file); setOpenMenuId(null); }}>
+                            Version history
                           </button>
                           <button className="fu-ctx-item"
                             onClick={() => { downloadFile(file); setOpenMenuId(null); }}>
@@ -953,12 +1119,12 @@ export default function FileUpload() {
                           </button>
                           <button className="fu-ctx-item"
                             onClick={() => { setMoveTarget(file); setOpenMenuId(null); }}>
-                            📂 Move to folder
+                            Move to folder
                           </button>
                           <div className="fu-ctx-sep" />
                           <button className="fu-ctx-item danger"
                             onClick={() => { setDeleteTarget({ type: "file", item: file }); setOpenMenuId(null); }}>
-                            🗑 Delete
+                            Delete
                           </button>
                         </div>
                       )}
@@ -969,6 +1135,55 @@ export default function FileUpload() {
             )}
           </div>
         </div>
+        <aside className="fu-insights">
+          <div>
+            <div className="fu-insight-title">Full-content search</div>
+            <input
+              className="fu-search-input"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search PDFs, code, text..."
+            />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {searchQuery.trim().length < 2 ? (
+              <div className="fu-search-snippet">Type at least 2 characters to search names and indexed file contents.</div>
+            ) : searchResults.length === 0 ? (
+              <div className="fu-search-snippet">No matches yet.</div>
+            ) : (
+              searchResults.map((result) => (
+                <div className="fu-search-result" key={result._id}>
+                  <div className="fu-search-name">{getFileIcon(result.mimetype)} {result.filename}</div>
+                  <div className="fu-search-snippet">
+                    {result.matchedContent ? result.snippet || "Matched inside file content." : "Matched by file name or type."}
+                  </div>
+                  <button
+                    className="fu-icon-btn open"
+                    onClick={async () => {
+                      const u = await getFileUrl(result.storageUrl);
+                      window.open(u, "_blank");
+                    }}
+                  >
+                    Open
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="fu-trust-card">
+            <div className="fu-trust-label">Duplicate protection</div>
+            <div className="fu-trust-value">{uploadedFiles.length} files watched</div>
+          </div>
+          <div className="fu-trust-card">
+            <div className="fu-trust-label">Visible versioning</div>
+            <div className="fu-trust-value">Open any file&apos;s Versions button</div>
+          </div>
+          <div className="fu-trust-card">
+            <div className="fu-trust-label">Expiring folder links</div>
+            <div className="fu-trust-value">Read or add access, 1-30 days</div>
+          </div>
+        </aside>
+        </div>
       </div>
 
       {/* ── Context menu ── */}
@@ -977,19 +1192,21 @@ export default function FileUpload() {
           {ctxMenu.itemType === "file" ? (
             <>
               <button className="fu-ctx-item" onClick={async () => { const u = await getFileUrl((ctxMenu.item as FileType).storageUrl); window.open(u, "_blank"); setCtxMenu(null); }}>↗ Open</button>
-              <button className="fu-ctx-item" onClick={() => { openShareModal(ctxMenu.item as FileType); setCtxMenu(null); }}>🔗 Share</button>
+              <button className="fu-ctx-item" onClick={() => { openShareModal(ctxMenu.item as FileType); setCtxMenu(null); }}>Share</button>
               <button className="fu-ctx-item" onClick={() => { downloadFile(ctxMenu.item as FileType); setCtxMenu(null); }}>⬇ Download</button>
-              <button className="fu-ctx-item" onClick={() => { setMoveTarget(ctxMenu.item as FileType); setCtxMenu(null); }}>📂 Move to folder</button>
+              <button className="fu-ctx-item" onClick={() => { setMoveTarget(ctxMenu.item as FileType); setCtxMenu(null); }}>Move to folder</button>
               <div className="fu-ctx-sep" />
-              <button className="fu-ctx-item danger" onClick={() => { setDeleteTarget({ type: "file", item: ctxMenu.item as FileType }); setCtxMenu(null); }}>🗑 Delete</button>
+              <button className="fu-ctx-item danger" onClick={() => { setDeleteTarget({ type: "file", item: ctxMenu.item as FileType }); setCtxMenu(null); }}>Delete</button>
             </>
           ) : (
             <>
-              <button className="fu-ctx-item" onClick={() => { setCurrentFolderId((ctxMenu.item as FolderType)._id); setCtxMenu(null); }}>📂 Open folder</button>
+              <button className="fu-ctx-item" onClick={() => { setCurrentFolderId((ctxMenu.item as FolderType)._id); setCtxMenu(null); }}>Open folder</button>
+              <button className="fu-ctx-item" onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "read"); setCtxMenu(null); }}>Share read link</button>
+              <button className="fu-ctx-item" onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "add"); setCtxMenu(null); }}>Share write link</button>
               <button className="fu-ctx-item" onClick={() => { setMoveFolderTarget(ctxMenu.item as FolderType); setCtxMenu(null); }}>Move folder</button>
               <button className="fu-ctx-item" onClick={() => { downloadFolder(ctxMenu.item as FolderType); setCtxMenu(null); }}>⬇ Download as ZIP</button>
               <div className="fu-ctx-sep" />
-              <button className="fu-ctx-item danger" onClick={() => { setDeleteTarget({ type: "folder", item: ctxMenu.item as FolderType }); setCtxMenu(null); }}>🗑 Delete folder</button>
+              <button className="fu-ctx-item danger" onClick={() => { setDeleteTarget({ type: "folder", item: ctxMenu.item as FolderType }); setCtxMenu(null); }}>Delete folder</button>
             </>
           )}
         </div>
@@ -999,8 +1216,32 @@ export default function FileUpload() {
       {shareTarget && (
         <div className="fu-overlay" onClick={() => setShareTarget(null)}>
           <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="fu-modal-title">🔗 Share file</div>
-            <div className="fu-modal-sub">Anyone with the link can view <span>{shareTarget.filename}</span></div>
+            <div className="fu-modal-title">Share {shareTarget.type}</div>
+            <div className="fu-modal-sub">
+              {shareTarget.type === "file"
+                ? <>Anyone with the link can view <span>{shareTarget.item.filename}</span></>
+                : <>Folder link for <span>{shareTarget.item.name}</span> ({sharePermission === "add" ? "write access" : "read only"})</>}
+            </div>
+            {shareTarget.type === "folder" && (
+              <div className="fu-folder-picker" style={{ marginBottom: 12 }}>
+                <button className={`fu-picker-item ${sharePermission === "read" ? "active" : ""}`} onClick={() => { setSharePermission("read"); openFolderShareModal(shareTarget.item, "read"); }}>
+                  Read only
+                </button>
+                <button className={`fu-picker-item ${sharePermission === "add" ? "active" : ""}`} onClick={() => { setSharePermission("add"); openFolderShareModal(shareTarget.item, "add"); }}>
+                  Write access
+                </button>
+                <input
+                  className="fu-share-url"
+                  style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 9, width: "100%" }}
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={shareExpiresInDays}
+                  onChange={(e) => setShareExpiresInDays(Number(e.target.value))}
+                  onBlur={refreshFolderShare}
+                />
+              </div>
+            )}
             {shareUrl ? (
               <div className="fu-share-url-wrap">
                 <input className="fu-share-url" readOnly value={shareUrl} />
@@ -1022,19 +1263,30 @@ export default function FileUpload() {
       {moveTarget && (
         <div className="fu-overlay" onClick={() => setMoveTarget(null)}>
           <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="fu-modal-title">📂 Move file</div>
+            <div className="fu-modal-title">Move file</div>
             <div className="fu-modal-sub">Choose a destination for <span>{moveTarget.filename}</span></div>
             <div className="fu-folder-picker">
               <button className={`fu-picker-item ${moveTarget.folderId === null ? "active" : ""}`} onClick={() => moveFile(moveTarget, null)}>
-                🏠 Root (no folder)
+                Root (no folder)
               </button>
+              {moveTarget.folderId === null && (
+                <div className="fu-move-create">
+                  <input
+                    value={moveNewFolderName}
+                    onChange={(e) => setMoveNewFolderName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") createFolderAndMoveFile(); }}
+                    placeholder="Create folder in root"
+                  />
+                  <button onClick={createFolderAndMoveFile}>Create & move</button>
+                </div>
+              )}
               {folders.map((folder) => (
                 <button
                   key={folder._id}
                   className={`fu-picker-item ${moveTarget.folderId === folder._id ? "active" : ""}`}
                   onClick={() => moveFile(moveTarget, folder._id)}
                 >
-                  📁 {folder.name}
+                  {folder.name}
                   <span style={{ marginLeft: "auto", fontSize: "0.7rem", color: "var(--text-muted)" }}>
                     {uploadedFiles.filter(f => f.folderId === folder._id).length}
                   </span>
@@ -1047,7 +1299,6 @@ export default function FileUpload() {
           </div>
         </div>
       )}
-
 
       {moveFolderTarget && (
         <div className="fu-overlay" onClick={() => setMoveFolderTarget(null)}>
@@ -1080,11 +1331,40 @@ export default function FileUpload() {
         </div>
       )}
 
-      {/* ── Delete modal ── */}
+      {/* ── Version history modal ── */}
+      {versionTarget && (
+        <div className="fu-overlay" onClick={() => setVersionTarget(null)}>
+          <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="fu-modal-title">Version history</div>
+            <div className="fu-modal-sub">Every saved version of <span>{versionTarget.filename}</span> is visible here.</div>
+            <div className="fu-folder-picker">
+              {versionsLoading ? (
+                <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Loading versions…</div>
+              ) : versions.length === 0 ? (
+                <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>No versions recorded yet.</div>
+              ) : (
+                versions.map((version) => (
+                  <button className={`fu-picker-item ${version.isCurrent ? "active" : ""}`} key={version.id} onClick={() => openVersionUrl(version)}>
+                    v{version.version}
+                    <span style={{ marginLeft: "auto", fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                      {version.isCurrent ? "Current" : new Date(version.uploadedAt).toLocaleDateString()}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="fu-modal-actions">
+              <button className="fu-modal-btn secondary" onClick={() => setVersionTarget(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete confirm modal ── */}
       {deleteTarget && (
         <div className="fu-overlay" onClick={() => setDeleteTarget(null)}>
           <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="fu-modal-title">🗑 Confirm delete</div>
+            <div className="fu-modal-title">⚠ Confirm delete</div>
             <div className="fu-modal-sub">
               {deleteTarget.type === "file"
                 ? `Delete "${(deleteTarget.item as FileType).filename}"? This cannot be undone.`
@@ -1107,4 +1387,3 @@ export default function FileUpload() {
     </>
   );
 }
-

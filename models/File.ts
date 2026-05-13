@@ -10,11 +10,16 @@ const FileSchema = new Schema({
   owner_email: { type: String, required: true },
   mimetype:   { type: String },
   size:       { type: Number },
+  searchText: { type: String, default: "" },
+  textIndexedAt: { type: Date, default: null },
   folders_id: { type: Schema.Types.ObjectId, default: null },
   folderId:   { type: Schema.Types.ObjectId, default: null },
   owner_id:   { type: Schema.Types.ObjectId, required: true },
   storageUrl: { type: String, required: true },           // the S3 key
   status:     { type: String, enum: ['pending', 'uploaded'], default: 'pending' },
 }, { timestamps: true });
+
+FileSchema.index({ owner_id: 1, hash: 1, status: 1 });
+FileSchema.index({ filename: "text", searchText: "text" });
 
 export default mongoose.models.File|| mongoose.model('File', FileSchema);

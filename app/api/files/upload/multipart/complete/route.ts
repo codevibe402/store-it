@@ -5,6 +5,7 @@ import connectDB from "@/lib/mongoose";
 import { s3, BUCKET } from "@/lib/s3";
 import { CompleteMultipartUploadCommand } from "@aws-sdk/client-s3";
 import File from "@/models/File";
+import FileVersion from "@/models/FileVersion";
 import User from "@/models/User";
 
 export async function POST(req: NextRequest) {
@@ -51,6 +52,12 @@ export async function POST(req: NextRequest) {
   if (file.status !== "uploaded") {
     file.status = "uploaded";
     await file.save();
+
+    await FileVersion.updateOne(
+      { file_id: file._id, version: 1 },
+      { $setOnInsert: { file_id: file._id, version: 1, storage_url: file.storageUrl } },
+      { upsert: true }
+    );
 
     await User.findByIdAndUpdate(file.owner_id, { $inc: { storageused: file.size } });
   }

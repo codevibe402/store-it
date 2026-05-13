@@ -18,9 +18,8 @@ import File from "@/models/File";
 //                                  filename, mimetype, size }
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SHARE_TTL_SECONDS  = 7 * 24 * 60 * 60;
-const SHARE_TTL_MS       = SHARE_TTL_SECONDS * 1000;
 const REUSE_THRESHOLD_MS = 30 * 60 * 1000;
+const SHARE_PERMISSIONS = ["read", "add"] as const;
 
 type LeanId = { _id: { toString(): string } };
 type LeanFolderName = { name: string };
@@ -55,6 +54,16 @@ export async function POST(
 
     await connectDB();
     const now = new Date();
+    const body = await req.json().catch(() => ({})) as {
+      permission?: "read" | "add";
+      expiresInDays?: number;
+    };
+    const permission = SHARE_PERMISSIONS.includes(body.permission as "read" | "add")
+      ? body.permission
+      : "read";
+    const expiresInDays = Math.min(Math.max(Number(body.expiresInDays) || 7, 1), 30);
+    const ttlMs = expiresInDays * 24 * 60 * 60 * 1000;
+    const ttlSeconds = Math.floor(ttlMs / 1000);
 
     // ── 1. Verify folder ownership ─────────────────────────────────────────
     const folder = await Folder.findOne({
@@ -72,6 +81,7 @@ export async function POST(
     const existingShare = await FolderShare.findOne({
       folderId:  id,
       owner_id:  userId,
+      permission,
       expiresAt: { $gt: reuseDeadline },
     }).lean();
 
@@ -81,6 +91,7 @@ export async function POST(
         shareUrl:   buildShareUrl(req, existingShare.token),
         expiresAt:  existingShare.expiresAt,
         fileCount:  existingShare.files?.length ?? 0,
+        permission: existingShare.permission ?? "read",
         reused:     true,
       });
     }
@@ -93,7 +104,7 @@ export async function POST(
     }).lean();
 
     // ── 4. Presign a view URL for every file ───────────────────────────────
-    const expiresAt = new Date(now.getTime() + SHARE_TTL_MS);
+    const expiresAt = new Date(now.getTime() + ttlMs);
 
     const presignedFiles = await Promise.all(
       files.map(async (file) => {
@@ -105,7 +116,7 @@ export async function POST(
         });
 
         const url = await getSignedUrl(s3, command, {
-          expiresIn: SHARE_TTL_SECONDS,
+          expiresIn: ttlSeconds,
         });
 
         const fileId = (file as LeanId)._id.toString();
@@ -130,6 +141,7 @@ export async function POST(
       folderId:   id,
       folderName: (folder as LeanFolderName).name,
       owner_id:   userId,
+      permission,
       files:      presignedFiles,
       expiresAt,
     });
@@ -139,6 +151,7 @@ export async function POST(
       shareUrl:   buildShareUrl(req, token),
       expiresAt,
       fileCount:  presignedFiles.length,
+      permission,
       reused:     false,
     });
   } catch (err: unknown) {

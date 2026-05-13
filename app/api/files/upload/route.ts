@@ -4,11 +4,22 @@ import { authOptions } from "@/lib/[...nextauth]";
 import connectDB from "@/lib/mongoose";
 import { s3, BUCKET } from "@/lib/s3";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import File from "@/models/File";
+import FileVersion from "@/models/FileVersion";
 import User from "@/models/User";
+import { extractSearchText } from "@/lib/fileText";
 
 const MAX_SIZE = 10 * 1024 * 1024;
+
+function isUploadedFile(value: FormDataEntryValue | null): value is File {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "arrayBuffer" in value &&
+    "name" in value &&
+    "size" in value
+  );
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,10 +28,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await req.json();
-    const { filename, mimeType, size, folderId = null, hash } = body;
+    const formData = await req.formData();
+    const uploadedFile = formData.get("file");
+    const hash = formData.get("hash");
+    const folderId = formData.get("folderId");
 
-    if (!filename || !mimeType || !size || !hash) {
+    if (!isUploadedFile(uploadedFile) || typeof hash !== "string") {
+      return NextResponse.json(
+        { error: "file and hash are required" },
+        { status: 400 }
+      );
+    }
+
+    const filename = uploadedFile.name;
+    const mimeType = uploadedFile.type || "application/octet-stream";
+    const size = uploadedFile.size;
+    const normalizedFolderId =
+      typeof folderId === "string" && folderId.trim() ? folderId : null;
+
+    if (!filename || !size) {
       return NextResponse.json(
         { error: "Missing required fields" },
         { status: 400 }
@@ -63,6 +89,56 @@ export async function POST(req: NextRequest) {
 
     const key = `uploads/${user._id}/${Date.now()}-${filename}`;
 
+    const buffer = Buffer.from(await uploadedFile.arrayBuffer());
+    const searchText = await extractSearchText(buffer, filename, mimeType);
+
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+        Body: buffer,
+        ContentType: mimeType,
+        ContentLength: size,
+      })
+    );
+
+    const previousVersion = await File.findOne({
+      filename,
+      owner_id: user._id,
+      folderId: normalizedFolderId,
+      status: "uploaded",
+      hash: { $ne: hash },
+    });
+
+    if (previousVersion) {
+      const latestVersion = await FileVersion.findOne({ file_id: previousVersion._id })
+        .sort({ version: -1 })
+        .lean();
+      const nextVersion = (latestVersion?.version ?? 1) + 1;
+
+      await FileVersion.create({
+        file_id: previousVersion._id,
+        version: nextVersion,
+        storage_url: key,
+      });
+
+      const oldSize = previousVersion.size ?? 0;
+      previousVersion.hash = hash;
+      previousVersion.mimetype = mimeType;
+      previousVersion.size = size;
+      previousVersion.storageUrl = key;
+      previousVersion.searchText = searchText;
+      previousVersion.textIndexedAt = searchText ? new Date() : null;
+      await previousVersion.save();
+
+      await User.findByIdAndUpdate(user._id, { $inc: { storageused: size - oldSize } });
+
+      return NextResponse.json(
+        { file: previousVersion, version: nextVersion, versioned: true },
+        { status: 201 }
+      );
+    }
+
     const file = await File.create({
       filename,
       hash,
@@ -70,24 +146,23 @@ export async function POST(req: NextRequest) {
       owner_id: user._id,
       mimetype: mimeType,
       size,
+      searchText,
+      textIndexedAt: searchText ? new Date() : null,
       storageUrl: key,
-      folders_id: folderId,
-      folderId,
-      status: "pending",
+      folders_id: normalizedFolderId,
+      folderId: normalizedFolderId,
+      status: "uploaded",
     });
 
-    const uploadUrl = await getSignedUrl(
-      s3,
-      new PutObjectCommand({
-        Bucket: BUCKET,
-        Key: key,
-        ContentType: mimeType,
-        ContentLength: size,
-      }),
-      { expiresIn: 900 }
-    );
+    await FileVersion.create({
+      file_id: file._id,
+      version: 1,
+      storage_url: key,
+    });
 
-    return NextResponse.json({ uploadUrl, fileId: file._id.toString(),key});
+    await User.findByIdAndUpdate(user._id, { $inc: { storageused: size } });
+
+    return NextResponse.json({ file }, { status: 201 });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "Server error" }, { status: 500 });

@@ -14,6 +14,7 @@ export interface IFolderShare extends Document {
   folderId: string;       // ← was missing; route.ts stores & queries this
   folderName: string;
   owner_id: string;
+  permission: "read" | "add";
   files: IShareFile[];
   expiresAt: Date;
   createdAt: Date;
@@ -25,6 +26,7 @@ const FolderShareSchema = new Schema<IFolderShare>(
     folderId:   { type: String, required: true, index: true }, // ← added
     folderName: { type: String, required: true },
     owner_id:   { type: String, required: true, index: true },
+    permission: { type: String, enum: ["read", "add"], default: "read" },
     files: [
       {
         fileId:      String,

@@ -42,8 +42,8 @@ export async function POST(req: Request) {
       { message: 'Account created successfully', user: { id: user._id.toString(), name: user.name, email: user.email } },
       { status: 201 }
     )
-  } catch (error: any) {
-    if (error.code === 11000) {
+  } catch (error: unknown) {
+    if ((error as { code?: number }).code === 11000) {
       return NextResponse.json(
         { error: 'An account with this email already exists' },
         { status: 409 }
