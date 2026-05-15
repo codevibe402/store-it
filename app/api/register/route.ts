@@ -24,31 +24,52 @@ export async function POST(req: Request) {
 
     await connectDB()
 
-    const existingUser = await User.findOne({ email: email.toLowerCase() })
+    const normalizedEmail = email.toLowerCase().trim()
+
+    // CHECK EXISTING USER
+    const existingUser = await User.findOne({
+      email: normalizedEmail,
+    })
+
     if (existingUser) {
       return NextResponse.json(
-        { error: 'An account with this email already exists' },
+        { error: 'Email already exists' },
         { status: 409 }
       )
     }
 
+   
     const user = await User.create({
       name: username.trim(),
-      email: email.toLowerCase().trim(),
-      password: password,
+      email: normalizedEmail,
+      password: password, 
+      provider: "credentials"
     })
 
     return NextResponse.json(
-      { message: 'Account created successfully', user: { id: user._id.toString(), name: user.name, email: user.email } },
+      {
+        message: 'Account created successfully',
+        user: {
+          id: user._id.toString(),
+          name: user.name,
+          email: user.email,
+        },
+      },
       { status: 201 }
     )
-  } catch (error: unknown) {
-    if ((error as { code?: number }).code === 11000) {
+  } catch (error: any) {
+    console.log(error)
+
+    if (error.code === 11000) {
       return NextResponse.json(
-        { error: 'An account with this email already exists' },
+        { error: 'Duplicate email detected' },
         { status: 409 }
       )
     }
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
   }
 }

@@ -6,7 +6,7 @@ import SessionProviderWrapper from '@/app/sessionprovidewrapper/page';
 
 import Providers from "@/components/ui/providers";
 
-
+import { Toaster } from "sonner";
 
 
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
@@ -22,6 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body> <SessionProviderWrapper>
   <Providers>
     {children}
+     <Toaster richColors position="top-right" />
   </Providers>
 </SessionProviderWrapper>
       </body>

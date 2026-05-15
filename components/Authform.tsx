@@ -64,20 +64,12 @@ const Authform = () => {
     },
   })
 
-  // Reset form when switching modes
-  const handleTypeSwitch = (newType: FormType) => {
-    setType(newType)
-    form.reset({ email: "", username: "", password: "" })
-  }
-
-
-
 
 
 async function onSubmit(data: FormValues) {
   try {
-    if (type === "sign-up") {
-      // 🟢 REGISTER USER
+    // ================= SIGN UP =================
+      if (type === "sign-up") {
       const res = await fetch("/api/register", {
         method: "POST",
         headers: {
@@ -88,38 +80,57 @@ async function onSubmit(data: FormValues) {
 
       const result = await res.json();
 
+      // SHOW BACKEND ERROR
       if (!res.ok) {
-        toast.error(result.error || "Signup failed");
+        toast.error(result.error || "Registration failed");
         return;
       }
 
-      toast.success("Account created!");
+      // SUCCESS
+      toast.success("Registration successful!");
 
-      router.push("/sign_in")
-
-    } else {
-      // 🔵 LOGIN USER
-      const res = await signIn("credentials", {
-        email: data.email,
-        password: data.password,
-        redirect: false,
+      // RESET FORM
+      form.reset({
+        email: "",
+        username: "",
+        password: "",
       });
 
-      if (res?.error) {
-        toast.error(res.error);
-        return;
-      }
+      // SWITCH TO SIGN IN
+      setType("sign-in");
 
-      toast.success("Logged in!");
-      router.push("/dashboard");
+      // OPTIONAL ROUTE CHANGE
+      router.push("/sign_in");
+
+      return;
     }
 
-  } catch {
-    toast.error("Server error");
+    // ================= SIGN IN =================
+    const res = await signIn("credentials", {
+      email: data.email,
+      password: data.password,
+      redirect: false,
+    });
+
+    // INVALID CREDENTIALS
+    if (res?.error) {
+      toast.error("Invalid credentials");
+      return;
+    }
+
+    // SUCCESS
+    toast.success("Logged in successfully!");
+
+    router.push("/dashboard");
+
+  } catch (error) {
+    console.log(error);
+    toast.error("Something went wrong");
   }
 }
-
-  
+  const handleTypeSwitch = (newType: FormType) => {
+  setType(newType)
+}
 
   return (
     <Card className="w-full sm:max-w-md">
