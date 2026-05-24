@@ -522,7 +522,7 @@ export default function ShowFilesPage() {
       <div className="sf-root">
         {/* ── Top bar ── */}
         <header className="sf-topbar">
-          <button className="sf-back-btn" onClick={() => router.push("/")}>
+          <button className="sf-back-btn" onClick={() => router.push("/dashboard")}>
             ← Back
           </button>
           <div className="sf-topbar-title">Browse files</div>
