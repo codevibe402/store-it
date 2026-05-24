@@ -1,57 +1,77 @@
 import FileUpload from "@/components/ui/fileupload";
 
 export default function UploadPage() {
-
-
-  
   return (
     <main className="upload-page">
-      <div className="upload-page-inner">
-        <div className="upload-header">
-          <h1 className="upload-title">Upload a File</h1>
-          <p className="upload-desc">
-            Store and manage your files securely. Drag and drop or browse to get started.
-          </p>
-        </div>
+      <div className="bg-orb orb-1" />
+      <div className="bg-orb orb-2" />
+      <div className="bg-orb orb-3" />
 
+      <div className="upload-page-inner">
         <FileUpload />
       </div>
 
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
         .upload-page {
           min-height: 100vh;
+          width: 100%;
           display: flex;
           align-items: center;
           justify-content: center;
-          background: #f9fafb;
-          font-family: 'DM Sans', sans-serif;
+          background: #0a0b0f;
+          font-family: 'Inter', sans-serif;
           padding: 24px;
+          box-sizing: border-box;
+          position: relative;
+          overflow: hidden;
         }
+
+        /* Ambient background orbs */
+        .bg-orb {
+          position: absolute;
+          border-radius: 50%;
+          filter: blur(120px);
+          pointer-events: none;
+          z-index: 0;
+        }
+        .orb-1 {
+          width: 600px;
+          height: 600px;
+          background: radial-gradient(circle, rgba(99, 102, 241, 0.18) 0%, transparent 70%);
+          top: -150px;
+          left: -100px;
+        }
+        .orb-2 {
+          width: 500px;
+          height: 500px;
+          background: radial-gradient(circle, rgba(139, 92, 246, 0.14) 0%, transparent 70%);
+          bottom: -100px;
+          right: -80px;
+        }
+        .orb-3 {
+          width: 400px;
+          height: 400px;
+          background: radial-gradient(circle, rgba(59, 130, 246, 0.10) 0%, transparent 70%);
+          top: 40%;
+          left: 50%;
+          transform: translateX(-50%);
+        }
+
         .upload-page-inner {
+          position: relative;
+          z-index: 1;
+          width: 100%;
+          max-width: 1200px;
           display: flex;
           flex-direction: column;
-          align-items: center;
-          gap: 32px;
+          align-items: stretch;
+        }
+
+        /* Override FileUpload container to fill space */
+        .upload-page-inner > * {
           width: 100%;
-        }
-        .upload-header {
-          text-align: center;
-          max-width: 420px;
-        }
-        .upload-title {
-          font-size: 1.75rem;
-          font-weight: 700;
-          color: #111827;
-          margin: 0 0 8px;
-          letter-spacing: -0.02em;
-        }
-        .upload-desc {
-          font-size: 0.95rem;
-          color: #6b7280;
-          margin: 0;
-          line-height: 1.6;
         }
       `}</style>
     </main>
