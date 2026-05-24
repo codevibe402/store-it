@@ -29,6 +29,15 @@ async function getUserId(): Promise<string> {
 // ── POST /api/files/:id/share ─────────────────────────────────────────────────
 // Creates a presigned S3 URL that anyone can use to view/download the file.
 // Idempotent — returns the existing share if still valid (> 30 min remaining).
+//
+// Strategy:
+// - Uses S3 presigned URLs with 7-day expiration
+// - CloudFront automatically caches the presigned URL for its lifetime
+// - When the presigned URL expires, CloudFront stops serving it
+// - No extra setup needed—expiration is built into the presigned URL
+//
+// Note: This endpoint is for shared access (anyone with the URL can access).
+// For regular user downloads, see GET /api/files/:id/download (CloudFront cached)
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

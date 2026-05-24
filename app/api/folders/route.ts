@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/[...nextauth]";
 import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/mongoose";
+import { getCacheControlHeader } from "@/lib/cdn";
 import Folder from "@/models/Folder";
 
 // GET /api/folders — list all folders for user
@@ -11,7 +12,11 @@ export async function GET() {
 
   await connectDB();
   const folders = await Folder.find({ owner_email: session.user.email }).sort({ createdAt: -1 }).lean();
-  return NextResponse.json(folders);
+  
+  const response = NextResponse.json(folders);
+  response.headers.set('Cache-Control', getCacheControlHeader('folders'));
+  
+  return response;
 }
 
 // POST /api/folders — create a new folder

@@ -396,22 +396,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* STATS */}
-      <div className="si-stats-band">
-        <div className="si-stats-inner">
-          {[
-            { num: "50M+",  label: "Files stored daily" },
-            { num: "2M+",   label: "Happy users"        },
-            { num: "99.9%", label: "Uptime SLA"         },
-            { num: "180+",  label: "Countries served"   },
-          ].map((s) => (
-            <div key={s.label}>
-              <div className="si-stat-num">{s.num}</div>
-              <div className="si-stat-label">{s.label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+    
 
       {/* CTA */}
       <section className="si-cta-section" id="pricing">

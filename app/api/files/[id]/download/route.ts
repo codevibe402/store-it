@@ -7,6 +7,7 @@ import { getServerSession } from "next-auth";
 import connectMongoose from "@/lib/mongoose";
 import { authOptions } from "@/lib/[...nextauth]";          // ← fixed path
 import { s3, BUCKET } from "@/lib/s3";
+import { generateFileUrl, CDN_CONFIG } from "@/lib/cdn";
 import File from "@/models/File";
 
 const DOWNLOAD_URL_TTL = 60; // seconds — short-lived, browser fetches immediately
@@ -23,8 +24,15 @@ async function getUserId(): Promise<string> {
 }
 
 // ── GET /api/files/:id/download ───────────────────────────────────────────────
-// Returns a 302 redirect to a presigned S3 URL that forces the browser to
-// download the file rather than opening it inline.
+// Returns a 302 redirect to download the file.
+//
+// Strategy:
+// - If CloudFront is configured: Uses CloudFront URL (cached 24 hours) ✅
+// - If CloudFront is NOT configured: Falls back to S3 presigned URL
+//
+// This endpoint is for authenticated user downloads of their own files.
+// For shared files, see POST /api/files/:id/share (uses presigned URLs)
+// For version downloads, see POST /api/files/:id/versions (uses presigned URLs)
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -50,21 +58,35 @@ export async function GET(
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
-    // ── 2. Generate presigned download URL ────────────────────────────────
-    //    ResponseContentDisposition forces download instead of inline preview.
-    const command = new GetObjectCommand({
-      Bucket: BUCKET,
-      Key:    file.storageUrl,
-      ResponseContentDisposition: `attachment; filename="${encodeURIComponent(file.filename)}"`,
-      ResponseContentType: file.mimetype,
-    });
+    // ── 2. Generate download URL ────────────────────────────────────────────
+    let downloadUrl: string;
 
-    const signedUrl = await getSignedUrl(s3, command, {   // ← was s3Client
-      expiresIn: DOWNLOAD_URL_TTL,
-    });
+    if (CDN_CONFIG.useCloudFront) {
+      // Use CloudFront URL directly (pre-signed at CDN level)
+      downloadUrl = generateFileUrl(file.storageUrl);
+    } else {
+      // Fall back to S3 presigned URL
+      const command = new GetObjectCommand({
+        Bucket: BUCKET,
+        Key:    file.storageUrl,
+        ResponseContentDisposition: `attachment; filename="${encodeURIComponent(file.filename)}"`,
+        ResponseContentType: file.mimetype,
+      });
+
+      downloadUrl = await getSignedUrl(s3, command, {
+        expiresIn: 60, // 60 seconds
+      });
+    }
 
     // ── 3. Redirect — browser follows immediately and starts the download ──
-    return NextResponse.redirect(signedUrl, { status: 302 });
+    const response = NextResponse.redirect(downloadUrl, { status: 302 });
+    
+    // Add cache headers for CDN
+    if (CDN_CONFIG.useCloudFront) {
+      response.headers.set('Cache-Control', 'public, max-age=86400');
+    }
+    
+    return response;
   } catch (err: unknown) {
     if ((err as { status?: number })?.status === 401) {
       return NextResponse.json({ error: "Unauthorised" }, { status: 401 });

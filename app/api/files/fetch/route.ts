@@ -1,6 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/[...nextauth]";
 import connectDB from "@/lib/mongoose";
+import { getCacheControlHeader } from "@/lib/cdn";
 import File from "@/models/File";
 import { NextResponse } from "next/server";
 
@@ -13,7 +14,7 @@ export async function GET() {
   }
 
   try {
-    await connectDB();
+    await connectDB(); 
 
     const files = await File.find({
       owner_email: session.user.email,
@@ -30,7 +31,11 @@ export async function GET() {
       folderId: file.folderId?.toString?.() ?? file.folders_id?.toString?.() ?? null,
     }));
 
-    return NextResponse.json(normalizedFiles);
+    // ── Add cache headers for 5 minutes ──────────────────────────────
+    const response = NextResponse.json(normalizedFiles);
+    response.headers.set('Cache-Control', getCacheControlHeader('metadata'));
+    
+    return response;
 
   } catch (error) {
     console.error("Failed to fetch files:", error);

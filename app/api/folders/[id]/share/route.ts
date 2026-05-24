@@ -37,6 +37,16 @@ async function getUserId(): Promise<string> {
 }
 
 // ── POST /api/folders/:id/share ───────────────────────────────────────────────
+// Creates presigned S3 URLs for all files in the folder for sharing.
+//
+// Strategy:
+// - Uses S3 presigned URLs with configurable expiration (1-30 days, default 7)
+// - CloudFront automatically caches each presigned URL for its lifetime
+// - When presigned URLs expire, CloudFront stops serving them
+// - Idempotent: returns existing share if still valid (> 30 min remaining)
+//
+// Note: This endpoint is for shared folder access (anyone with token can access).
+// For regular user folder downloads, see GET /api/folders/:id/download
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

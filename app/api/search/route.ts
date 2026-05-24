@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { authOptions } from "@/lib/[...nextauth]";
 import connectDB from "@/lib/mongoose";
+import { getCacheControlHeader } from "@/lib/cdn";
 import File from "@/models/File";
 
 function escapeRegex(value: string) {
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
     .limit(12)
     .lean();
 
-  return NextResponse.json({
+  const response = NextResponse.json({
     results: files.map((file) => ({
       _id: file._id.toString(),
       filename: file.filename,
@@ -44,6 +45,9 @@ export async function GET(req: NextRequest) {
       snippet: buildSnippet(file.searchText ?? "", q),
     })),
   });
+  
+  response.headers.set('Cache-Control', getCacheControlHeader('search'));
+  return response;
 }
 
 function buildSnippet(text: string, query: string) {

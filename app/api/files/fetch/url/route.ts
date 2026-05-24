@@ -2,12 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/[...nextauth]";
 import connectDB from "@/lib/mongoose";
-import { s3, BUCKET } from "@/lib/s3";
-import { GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { generateFileUrl, CDN_CONFIG } from "@/lib/cdn";
 import File from "@/models/File";
 import User from "@/models/User";
 
+// ── POST /api/files/fetch/url ─────────────────────────────────────────────────
+// Returns a CloudFront URL for authenticated users to fetch their files.
+// CloudFront caches the files for 24 hours (see CDN_CONFIG.cacheTTL.files).
+// 
+// Strategy:
+// - Regular downloads use CloudFront URLs (cached 24hrs)
+// - Shares/versions use presigned URLs from other endpoints
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
@@ -34,11 +39,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Access denied" }, { status: 403 });
   }
 
-  const url = await getSignedUrl(
-    s3,
-    new GetObjectCommand({ Bucket: BUCKET, Key: key }),
-    { expiresIn: 3600 } // 1 hour
-  );
+  // ── Generate CloudFront URL (cached) ───────────────────────────────────────
+  const url = generateFileUrl(key);
 
-  return NextResponse.json({ url }, { status: 200 });
+  return NextResponse.json({ url, cached: true }, { status: 200 });
 }

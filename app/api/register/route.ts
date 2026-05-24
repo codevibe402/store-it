@@ -1,6 +1,5 @@
-// app/api/register/route.ts
+// app/api/register/route.t
 import { NextResponse } from 'next/server'
-import bcrypt from 'bcryptjs'
 import connectDB from '../../../lib/mongoose'
 import User from '../../../models/User'
 

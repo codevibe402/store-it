@@ -79,6 +79,14 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "Version not found" }, { status: 404 });
   }
 
+  // ── Strategy: Use presigned URL for version downloads ────────────────────
+  // - Generates 10-minute presigned S3 URLs (for version access control)
+  // - CloudFront caches these presigned URLs for their lifetime
+  // - After 10 minutes, URLs expire and CloudFront stops serving them
+  // - Each version has a unique storageUrl, so they're served separately
+  //
+  // Alternative (future): Could use CloudFront signed URLs if we want
+  // longer-lived version URLs with better performance
   const url = await getSignedUrl(
     s3,
     new GetObjectCommand({
