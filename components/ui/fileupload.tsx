@@ -3,10 +3,12 @@ import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect, DragEvent, ChangeEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-
+import {useReducer} from "react"
 // ── Constants ────────────────────────────────────────────────────────────────
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 const CHUNK_SIZE = 10 * 1024 * 1024;
+const TELEGRAM_CHUNK_SIZE = 30 * 1024 * 1024;
+const TELEGRAM_CONCURRENCY = 3;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type UploadStatus = "idle" | "uploading" | "success" | "error" | "duplicate";
@@ -21,22 +23,35 @@ type FileType = {
   status: "pending" | "uploaded";
   folderId: string | null;
   createdAt: string;
+  backend?: "s3" | "telegram";
 };
 
 type FolderType = {
-  _id: string;
-  name: string;
-  owner_id: string;
-  parent_id?: string | null;
+  _id: string
+  name: string
+  owner_id: string
+  parent_id?: string | null
   createdAt: string;
 };
 
 type ContextMenu = {
   x: number;
-  y: number;
-  item: FileType | FolderType;
+  y: number
+  item: FileType | FolderType
   itemType: "file" | "folder";
 };
+type uploadstate={
+  status:UploadStatus
+  progress: number
+  error: string
+   duplicateFile: FileType | null
+}
+const initialState:uploadstate ={
+status: "idle",
+ progress: 0,
+error: "",
+duplicateFile: null
+}
 
 type DeleteTarget = { type: "file"; item: FileType } | { type: "folder"; item: FolderType };
 type ToastMsg = { msg: string; type: "error" | "warn" | "success" };
@@ -81,9 +96,30 @@ function getFileIcon(mimetype: string): string {
   if (mimetype.includes("sheet") || mimetype.includes("excel")) return "📊";
   return "📁";
 }
+type UploadAction= 
+    | { type: "UPLOAD_START" }
+    | { type: "UPLOAD_PROGRESS"; progress: number }
+    | { type: "UPLOAD_SUCCESS" }
+    | { type: "UPLOAD_ERROR"; message: string };
+function reducer(state: uploadstate,action: UploadAction):uploadstate{
+  switch(action.type){
+    case "UPLOAD_START":
+      return {...state}
+    case "UPLOAD_PROGRESS":
+      return {...state, progress: action.progress}
+    case "UPLOAD_SUCCESS":
+      return {...state, status: "success"} 
+    case "UPLOAD_ERROR":
+      return {...state, status: "error", error: action.message}
+  }
+
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function FileUpload() {
+  const [state, dispatch] = useReducer(reducer, initialState);
+
+
   const router = useRouter();
   const queryClient = useQueryClient();
   const { status: sessionStatus } = useSession();
@@ -119,8 +155,10 @@ export default function FileUpload() {
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
+  const [storageType, setStorageType] = useState<"s3" | "telegram">("telegram");
   const inputRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -258,7 +296,104 @@ export default function FileUpload() {
     return completeRes.json();
   }
 
+  async function getChunkHash(blob: Blob): Promise<string> {
+    const buffer = await blob.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+    return Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  async function telegramUpload(file: File, hash: string, onProgress: (pct: number) => void) {
+    const totalChunks = Math.ceil(file.size / TELEGRAM_CHUNK_SIZE);
+
+    const initRes = await fetch("/api/files/telegram/init", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: file.name, size: file.size, hash,
+        mimeType: file.type, folderId: currentFolderId,
+      }),
+    });
+    if (cancelRef.current) throw { isCancelled: true };
+    if (initRes.status === 409) { const d = await initRes.json(); throw { isDuplicate: true, existingFile: d.existingFile }; }
+    if (!initRes.ok) {
+      console.warn("Telegram init failed, falling back to S3");
+      return multipartUpload(file, hash, onProgress);
+    }
+    const { fileId } = await initRes.json();
+
+    const resumeRes = await fetch(`/api/files/telegram/${fileId}/resume`);
+    const resumeData = resumeRes.ok ? await resumeRes.json() : null;
+    const alreadyUploaded = new Set<number>(resumeData?.uploadedIndexes ?? []);
+    let uploadedBytes = resumeData?.uploadedBytes ?? 0;
+    onProgress(Math.round((uploadedBytes / file.size) * 100));
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    cancelRef.current = false;
+
+    const lock = { current: 0 };
+
+    async function worker() {
+      while (!cancelRef.current && !controller.signal.aborted) {
+        const index = lock.current++;
+        if (index >= totalChunks) break;
+        if (alreadyUploaded.has(index)) continue;
+
+        const start = index * TELEGRAM_CHUNK_SIZE;
+        const chunkBlob = file.slice(start, Math.min(start + TELEGRAM_CHUNK_SIZE, file.size));
+        const chunkHash = await getChunkHash(chunkBlob);
+
+        const formData = new FormData();
+        formData.append("fileId", fileId);
+        formData.append("chunkIndex", String(index));
+        formData.append("hash", chunkHash);
+        formData.append("chunk", chunkBlob);
+
+        let success = false;
+        for (let attempt = 0; attempt < 3 && !success; attempt++) {
+          try {
+            const res = await fetch("/api/files/telegram/chunk", {
+              method: "POST", body: formData, signal: controller.signal,
+            });
+            if (!res.ok) throw new Error(`Status ${res.status}`);
+            success = true;
+            uploadedBytes += chunkBlob.size;
+            onProgress(Math.round((uploadedBytes / file.size) * 100));
+          } catch (err: any) {
+            if (cancelRef.current || controller.signal.aborted) throw { isCancelled: true };
+            if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+            else throw new Error(`Chunk ${index} failed after 3 attempts`);
+          }
+        }
+      }
+    }
+
+    const workers = Array.from({ length: TELEGRAM_CONCURRENCY }, () => worker());
+    try {
+      await Promise.all(workers);
+    } catch (err) {
+      abortRef.current = null;
+      throw err;
+    }
+    abortRef.current = null;
+
+    if (cancelRef.current) throw { isCancelled: true };
+
+    const completeRes = await fetch("/api/files/telegram/complete", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId }),
+    });
+    if (!completeRes.ok) throw new Error("Failed to complete Telegram upload");
+
+    queryClient.invalidateQueries({ queryKey: ["files"] });
+    return completeRes.json();
+  }
+
   async function uploadSmart(file: File, hash: string, onProgress: (pct: number) => void) {
+    if (storageType === "telegram") {
+      return telegramUpload(file, hash, onProgress);
+    }
     return file.size < SMALL_FILE_LIMIT
       ? smallUploadMutation.mutateAsync({ file, hash })
       : multipartUpload(file, hash, onProgress);
@@ -274,15 +409,34 @@ export default function FileUpload() {
   };
 
   // ── File actions ──────────────────────────────────────────────────────────────
+  const openFile = async (file: FileType) => {
+    if (file.backend === "telegram") {
+      window.open(`/api/files/telegram/${file._id}/download`, "_blank");
+    } else {
+      const u = await getFileUrl(file.storageUrl);
+      window.open(u, "_blank");
+    }
+  };
+
   const downloadFile = async (file: FileType) => {
     try {
-      const url = await getFileUrl(file.storageUrl);
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl; a.download = file.filename; a.click();
-      window.URL.revokeObjectURL(blobUrl);
+      if (file.backend === "telegram") {
+        const res = await fetch(`/api/files/telegram/${file._id}/download`);
+        if (!res.ok) throw new Error("Telegram download failed");
+        const blob = await res.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl; a.download = file.filename; a.click();
+        window.URL.revokeObjectURL(blobUrl);
+      } else {
+        const url = await getFileUrl(file.storageUrl);
+        const res = await fetch(url);
+        const blob = await res.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl; a.download = file.filename; a.click();
+        window.URL.revokeObjectURL(blobUrl);
+      }
     } catch { setToast({ msg: "Download failed.", type: "error" }); }
   };
 
@@ -462,6 +616,8 @@ export default function FileUpload() {
   // ── Upload flow ───────────────────────────────────────────────────────────────
   const handleCancel = () => {
     cancelRef.current = true;
+    abortRef.current?.abort();
+    abortRef.current = null;
     if (intervalRef.current) clearInterval(intervalRef.current);
     setStatus("idle"); setProgress(0);
     setToast({ msg: "Upload cancelled.", type: "warn" });
@@ -877,6 +1033,13 @@ export default function FileUpload() {
         <div className="fu-topbar">
           <div className="fu-topbar-brand">Storage</div>
           <div className="fu-topbar-actions">
+            <button
+              className={`fu-topbar-btn ${storageType === "telegram" ? "accent" : ""}`}
+              onClick={() => setStorageType(storageType === "s3" ? "telegram" : "s3")}
+              style={storageType === "telegram" ? undefined : { color: "var(--text-dim)", borderColor: "var(--border)" }}
+            >
+              {storageType === "telegram" ? "☁️ Telegram" : "☁️ S3"}
+            </button>
             <button className="fu-topbar-btn accent" onClick={() => router.push("/sidebar")}>
               Browse by type
             </button>
@@ -1007,7 +1170,7 @@ export default function FileUpload() {
                   <span>{duplicateFile.filename}</span> already exists in your storage.
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="fu-dup-open-btn" onClick={async () => { const u = await getFileUrl(duplicateFile.storageUrl); window.open(u, "_blank"); }}>
+                  <button className="fu-dup-open-btn" onClick={async () => openFile(duplicateFile)}>
                     Open existing →
                   </button>
                   <button
@@ -1077,7 +1240,7 @@ export default function FileUpload() {
                   </div>
                   <div className="fu-file-actions">
                     <button className="fu-icon-btn open"
-                      onClick={async () => { const u = await getFileUrl(file.storageUrl); window.open(u, "_blank"); }}>
+                      onClick={async () => openFile(file)}>
                       Open ↗
                     </button>
                     <button className="fu-icon-btn share" onClick={() => openShareModal(file)}>Share</button>
@@ -1102,7 +1265,7 @@ export default function FileUpload() {
                           zIndex: 200, boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
                         }}>
                           <button className="fu-ctx-item"
-                            onClick={async () => { const u = await getFileUrl(file.storageUrl); window.open(u, "_blank"); setOpenMenuId(null); }}>
+                            onClick={async () => { await openFile(file); setOpenMenuId(null); }}>
                             ↗ Open
                           </button>
                           <button className="fu-ctx-item"
@@ -1159,10 +1322,7 @@ export default function FileUpload() {
                   </div>
                   <button
                     className="fu-icon-btn open"
-                    onClick={async () => {
-                      const u = await getFileUrl(result.storageUrl);
-                      window.open(u, "_blank");
-                    }}
+                    onClick={async () => openFile(result)}
                   >
                     Open
                   </button>
@@ -1191,7 +1351,7 @@ export default function FileUpload() {
         <div className="fu-ctx" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
           {ctxMenu.itemType === "file" ? (
             <>
-              <button className="fu-ctx-item" onClick={async () => { const u = await getFileUrl((ctxMenu.item as FileType).storageUrl); window.open(u, "_blank"); setCtxMenu(null); }}>↗ Open</button>
+              <button className="fu-ctx-item" onClick={async () => { await openFile(ctxMenu.item as FileType); setCtxMenu(null); }}>↗ Open</button>
               <button className="fu-ctx-item" onClick={() => { openShareModal(ctxMenu.item as FileType); setCtxMenu(null); }}>Share</button>
               <button className="fu-ctx-item" onClick={() => { downloadFile(ctxMenu.item as FileType); setCtxMenu(null); }}>⬇ Download</button>
               <button className="fu-ctx-item" onClick={() => { setMoveTarget(ctxMenu.item as FileType); setCtxMenu(null); }}>Move to folder</button>

@@ -15,8 +15,11 @@ const FileSchema = new Schema({
   folders_id: { type: Schema.Types.ObjectId, default: null },
   folderId:   { type: Schema.Types.ObjectId, default: null },
   owner_id:   { type: Schema.Types.ObjectId, required: true },
-  storageUrl: { type: String, required: true },           // the S3 key
+  storageUrl: { type: String, required: true },
   status:     { type: String, enum: ['pending', 'uploaded'], default: 'pending' },
+  backend:    { type: String, enum: ['s3', 'telegram'], default: 's3' },
+  totalChunks: { type: Number },
+  chunkSize:   { type: Number },
 }, { timestamps: true });
 
 FileSchema.index({ owner_id: 1, hash: 1, status: 1 });
