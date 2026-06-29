@@ -1085,13 +1085,6 @@ export default function FileUpload() {
         <div className="fu-topbar">
           <div className="fu-topbar-brand">Storage</div>
           <div className="fu-topbar-actions">
-            <button
-              className={`fu-topbar-btn ${storageType === "telegram" ? "accent" : ""}`}
-              onClick={() => setStorageType(storageType === "s3" ? "telegram" : "s3")}
-              style={storageType === "telegram" ? undefined : { color: "var(--text-dim)", borderColor: "var(--border)" }}
-            >
-              {storageType === "telegram" ? "☁️ Telegram" : "☁️ S3"}
-            </button>
             <button className="fu-topbar-btn accent" onClick={() => router.push("/sidebar")}>
               Browse by type
             </button>
