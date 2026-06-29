@@ -29,9 +29,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Storage limit exceeded" }, { status: 413 });
   }
 
-  const existing = await File.findOne({ owner_id: user._id, hash, status: "uploaded" });
+  const existing = await File.findOne({ owner_id: user._id, hash });
   if (existing) {
-    return NextResponse.json({ error: "Duplicate file", existingFile: existing }, { status: 409 });
+    if (existing.status === "uploaded") {
+      return NextResponse.json({ error: "Duplicate file", existingFile: existing }, { status: 409 });
+    }
+    return NextResponse.json({
+      fileId: existing._id.toString(),
+      totalChunks: existing.totalChunks,
+      chunkSize: existing.chunkSize,
+      resuming: true,
+    });
   }
 
   const totalChunks = Math.ceil(size / CHUNK_SIZE);

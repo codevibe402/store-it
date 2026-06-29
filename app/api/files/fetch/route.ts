@@ -3,10 +3,10 @@ import { authOptions } from "@/lib/[...nextauth]";
 import connectDB from "@/lib/mongoose";
 import { getCacheControlHeader } from "@/lib/cdn";
 import File from "@/models/File";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
 
   if (!session) {
@@ -14,11 +14,13 @@ export async function GET() {
   }
 
   try {
-    await connectDB(); 
+    await connectDB();
+
+    const status = req.nextUrl.searchParams.get("status") || "uploaded";
 
     const files = await File.find({
       owner_email: session.user.email,
-      status: "uploaded",
+      status,
     })
       .sort({ createdAt: -1 })
       .lean();

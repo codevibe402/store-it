@@ -18,6 +18,7 @@ type FileType = {
   filename: string;
   mimetype: string;
   size: number;
+  hash?: string;
   storageUrl: string;
   owner_id: string;
   status: "pending" | "uploaded";
@@ -157,9 +158,11 @@ export default function FileUpload() {
 
   const [storageType, setStorageType] = useState<"s3" | "telegram">("telegram");
   const inputRef = useRef<HTMLInputElement>(null);
+  const resumeInputRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [resumingId, setResumingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!toast) return;
@@ -223,6 +226,17 @@ export default function FileUpload() {
       return res.json();
     },
     enabled: isAuthenticated,
+  });
+
+  const { data: pendingFiles = [], isLoading: pendingLoading } = useQuery<FileType[]>({
+    queryKey: ["pending-files"],
+    queryFn: async () => {
+      const res = await fetch("/api/files/fetch?status=pending");
+      if (!res.ok) throw new Error("Failed to fetch pending files");
+      return res.json();
+    },
+    enabled: isAuthenticated,
+    refetchInterval: 15000,
   });
 
   const uploadedFiles = files.filter((f) => f.status === "uploaded");
@@ -317,8 +331,8 @@ export default function FileUpload() {
     if (cancelRef.current) throw { isCancelled: true };
     if (initRes.status === 409) { const d = await initRes.json(); throw { isDuplicate: true, existingFile: d.existingFile }; }
     if (!initRes.ok) {
-      console.warn("Telegram init failed, falling back to S3");
-      return multipartUpload(file, hash, onProgress);
+      const errBody = await initRes.json().catch(() => ({ error: "Unknown error" }));
+      throw new Error(`Telegram upload failed: ${errBody.error || initRes.statusText}`);
     }
     const { fileId } = await initRes.json();
 
@@ -654,6 +668,44 @@ export default function FileUpload() {
         setToast({ msg: uploadError?.message || "Upload failed.", type: "error" });
       }
     }
+  };
+
+  const handleResume = async (pendingFile: FileType, file: File) => {
+    setResumingId(pendingFile._id);
+    setStatus("uploading");
+    setProgress(0);
+    cancelRef.current = false;
+    try {
+      const hash = await getFileHash(file);
+      if (pendingFile.hash && hash !== pendingFile.hash) {
+        throw new Error("Selected file does not match the original. Hash mismatch.");
+      }
+      await telegramUpload(file, hash, (pct) => {
+        if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+        setProgress(pct);
+      });
+      setProgress(100);
+      setStatus("success");
+      setToast({ msg: `"${file.name}" upload resumed and completed!`, type: "success" });
+      queryClient.invalidateQueries({ queryKey: ["pending-files"] });
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+      setTimeout(() => setStatus("idle"), 3000);
+    } catch (err: unknown) {
+      const uploadError = err as UploadError;
+      if (uploadError?.isCancelled) return;
+      setStatus("error");
+      setErrorMsg(uploadError?.message || "Resume failed");
+      setToast({ msg: uploadError?.message || "Resume failed.", type: "error" });
+    } finally {
+      setResumingId(null);
+    }
+  };
+
+  const onResumeFileSelect = async (pendingFile: FileType) => {
+    const file = resumeInputRef.current?.files?.[0];
+    if (!file) return;
+    if (resumeInputRef.current) resumeInputRef.current.value = "";
+    await handleResume(pendingFile, file);
   };
 
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -1297,6 +1349,61 @@ export default function FileUpload() {
               ))
             )}
           </div>
+
+          {/* ── Pending Uploads ── */}
+          {!pendingLoading && pendingFiles.length > 0 && (
+            <div>
+              <div className="fu-section-header">
+                <span className="fu-section-title">⏳ Pending Uploads</span>
+                <span className="fu-section-count">{pendingFiles.length}</span>
+              </div>
+              {pendingFiles.map((pf) => (
+                <div key={pf._id} className="fu-file-card" style={{ borderColor: "rgba(251,191,36,0.3)" }}>
+                  <div className="fu-file-icon">⏳</div>
+                  <div className="fu-file-info">
+                    <div className="fu-file-name">{pf.filename}</div>
+                    <div className="fu-file-meta">
+                      {formatBytes(pf.size)} · {new Date(pf.createdAt).toLocaleDateString()} · {pf.backend === "telegram" ? "☁️ Telegram" : "☁️ S3"}
+                    </div>
+                  </div>
+                  <div className="fu-file-actions">
+                    <input ref={resumeInputRef} type="file" hidden onChange={() => onResumeFileSelect(pf)} />
+                    <button
+                      className="fu-icon-btn"
+                      style={{
+                        color: "var(--warn)",
+                        borderColor: "rgba(251,191,36,0.3)",
+                        opacity: resumingId === pf._id ? 0.5 : 1,
+                      }}
+                      disabled={resumingId === pf._id}
+                      onClick={() => resumeInputRef.current?.click()}
+                    >
+                      {resumingId === pf._id ? "⟳ Resuming..." : "⟳ Resume"}
+                    </button>
+                    <button
+                      className="fu-icon-btn danger"
+                      onClick={async () => {
+                        try {
+                          const res = await fetch(`/api/files/telegram/cancel`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ fileId: pf._id }),
+                          });
+                          if (!res.ok) throw new Error("Failed");
+                          queryClient.invalidateQueries({ queryKey: ["pending-files"] });
+                          setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" });
+                        } catch {
+                          setToast({ msg: "Failed to cancel upload.", type: "error" });
+                        }
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <aside className="fu-insights">
           <div>
