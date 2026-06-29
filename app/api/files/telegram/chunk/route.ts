@@ -78,7 +78,11 @@ export async function POST(req: NextRequest) {
           continue;
         }
       } else {
-        throw err;
+        console.error(`[telegram/chunk] Chunk ${chunkIndex} (attempt ${attempt}):`, err?.message || err);
+        return NextResponse.json(
+          { error: `Telegram upload failed: ${err?.message || "Unknown error"}` },
+          { status: 500 },
+        );
       }
     }
   }
