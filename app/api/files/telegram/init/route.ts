@@ -5,7 +5,7 @@ import connectDB from "@/lib/mongoose";
 import File from "@/models/File";
 import User from "@/models/User";
 
-const CHUNK_SIZE = 30 * 1024 * 1024;
+const CHUNK_SIZE = 4 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);

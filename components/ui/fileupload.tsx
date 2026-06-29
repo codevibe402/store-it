@@ -7,7 +7,7 @@ import {useReducer} from "react"
 // ── Constants ────────────────────────────────────────────────────────────────
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 const CHUNK_SIZE = 10 * 1024 * 1024;
-const TELEGRAM_CHUNK_SIZE = 30 * 1024 * 1024;
+const TELEGRAM_CHUNK_SIZE = 4 * 1024 * 1024;
 const TELEGRAM_CONCURRENCY = 3;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
