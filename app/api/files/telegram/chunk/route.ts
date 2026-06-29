@@ -11,6 +11,11 @@ async function sleep(ms: number) {
 }
 
 export async function POST(req: NextRequest) {
+  const _token = process.env.TELEGRAM_BOT_TOKEN;
+  const _channel = process.env.TELEGRAM_CHANNEL_ID;
+  const _apiUrl = process.env.TELEGRAM_BOT_API_URL;
+  console.log(`[telegram/chunk] token=${_token ? _token.slice(0,8)+'...' : 'MISSING'} channel=${_channel || 'MISSING'} apiUrl=${_apiUrl || 'MISSING'}`);
+
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
