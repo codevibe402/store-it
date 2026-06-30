@@ -8,7 +8,7 @@ import {useReducer} from "react"
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 const CHUNK_SIZE = 10 * 1024 * 1024;
 const TELEGRAM_CHUNK_SIZE = 4 * 1024 * 1024;
-const TELEGRAM_CONCURRENCY = 3;
+const TELEGRAM_CONCURRENCY = 6;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type UploadStatus = "idle" | "uploading" | "success" | "error" | "duplicate";
@@ -158,10 +158,10 @@ export default function FileUpload() {
 
   const [storageType, setStorageType] = useState<"s3" | "telegram">("telegram");
   const inputRef = useRef<HTMLInputElement>(null);
-  const resumeInputRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const currentFileIdRef = useRef<string | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -335,6 +335,7 @@ export default function FileUpload() {
       throw new Error(`Telegram upload failed: ${errBody.error || initRes.statusText}`);
     }
     const { fileId } = await initRes.json();
+    currentFileIdRef.current = fileId;
 
     const resumeRes = await fetch(`/api/files/telegram/${fileId}/resume`);
     const resumeData = resumeRes.ok ? await resumeRes.json() : null;
@@ -388,9 +389,11 @@ export default function FileUpload() {
       await Promise.all(workers);
     } catch (err) {
       abortRef.current = null;
+      currentFileIdRef.current = null;
       throw err;
     }
     abortRef.current = null;
+    currentFileIdRef.current = null;
 
     if (cancelRef.current) throw { isCancelled: true };
 
@@ -628,11 +631,25 @@ export default function FileUpload() {
   };
 
   // ── Upload flow ───────────────────────────────────────────────────────────────
-  const handleCancel = () => {
+  const handleCancel = async () => {
     cancelRef.current = true;
     abortRef.current?.abort();
     abortRef.current = null;
     if (intervalRef.current) clearInterval(intervalRef.current);
+
+    const fileId = currentFileIdRef.current;
+    if (fileId) {
+      currentFileIdRef.current = null;
+      try {
+        await fetch("/api/files/telegram/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileId }),
+        });
+      } catch {}
+      queryClient.invalidateQueries({ queryKey: ["pending-files"] });
+    }
+
     setStatus("idle"); setProgress(0);
     setToast({ msg: "Upload cancelled.", type: "warn" });
   };
@@ -699,13 +716,6 @@ export default function FileUpload() {
     } finally {
       setResumingId(null);
     }
-  };
-
-  const onResumeFileSelect = async (pendingFile: FileType) => {
-    const file = resumeInputRef.current?.files?.[0];
-    if (!file) return;
-    if (resumeInputRef.current) resumeInputRef.current.value = "";
-    await handleResume(pendingFile, file);
   };
 
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -880,6 +890,36 @@ export default function FileUpload() {
         .fu-dropzone-title { font-family: 'Syne', sans-serif; font-size: 0.95rem; font-weight: 600; color: var(--text); }
         .fu-dropzone-sub { font-size: 0.78rem; color: var(--text-muted); }
         .fu-dropzone-sub span { color: var(--accent); font-weight: 500; }
+
+        .fu-pending-banner {
+          width: 100%; margin-top: 12px; padding: 12px 14px;
+          background: rgba(251,191,36,0.06); border: 1px solid rgba(251,191,36,0.2);
+          border-radius: 10px; display: flex; flex-direction: column; gap: 8px;
+        }
+        .fu-pending-banner-title {
+          font-size: 0.78rem; font-weight: 600; color: var(--warn);
+        }
+        .fu-pending-row {
+          display: flex; align-items: center; gap: 8px;
+        }
+        .fu-pending-name {
+          font-size: 0.75rem; color: var(--text); flex: 1; overflow: hidden;
+          text-overflow: ellipsis; white-space: nowrap;
+        }
+        .fu-pending-meta {
+          font-size: 0.68rem; color: var(--text-muted); flex-shrink: 0;
+        }
+        .fu-pending-btn {
+          flex-shrink: 0; padding: 3px 10px; border-radius: 6px;
+          font-family: 'DM Sans', sans-serif; font-size: 0.7rem; font-weight: 500;
+          cursor: pointer; border: 1px solid var(--border); background: var(--surface2);
+          transition: all 0.15s; color: var(--text-dim);
+        }
+        .fu-pending-btn.resume { color: var(--warn); border-color: rgba(251,191,36,0.3); }
+        .fu-pending-btn.resume:hover:not(:disabled) { background: rgba(251,191,36,0.1); }
+        .fu-pending-btn.cancel { color: var(--error); border-color: rgba(248,113,113,0.25); }
+        .fu-pending-btn.cancel:hover { background: rgba(248,113,113,0.08); }
+        .fu-pending-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .fu-progress-wrap { width: 100%; display: flex; flex-direction: column; gap: 10px; }
         .fu-progress-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; }
@@ -1187,6 +1227,52 @@ export default function FileUpload() {
                 <div className="fu-dropzone-sub">
                   or <span>browse</span> — under 10 MB uploads instantly, larger files use multipart
                 </div>
+                {pendingFiles.length > 0 && (
+                  <div className="fu-pending-banner" onClick={(e) => e.stopPropagation()}>
+                    <div className="fu-pending-banner-title">
+                      ⏳ {pendingFiles.length} pending upload{pendingFiles.length > 1 ? "s" : ""}
+                    </div>
+                    {pendingFiles.map((pf) => (
+                      <div key={pf._id} className="fu-pending-row">
+                        <span className="fu-pending-name">{pf.filename}</span>
+                        <span className="fu-pending-meta">{formatBytes(pf.size)}</span>
+                        <button
+                          className="fu-pending-btn resume"
+                          disabled={resumingId === pf._id}
+                          onClick={async () => {
+                            const fileInput = document.createElement("input");
+                            fileInput.type = "file";
+                            fileInput.onchange = async () => {
+                              const f = fileInput.files?.[0];
+                              if (f) await handleResume(pf, f);
+                            };
+                            fileInput.click();
+                          }}
+                        >
+                          {resumingId === pf._id ? "⟳ Resuming..." : "⟳ Resume"}
+                        </button>
+                        <button
+                          className="fu-pending-btn cancel"
+                          onClick={async () => {
+                            try {
+                              await fetch("/api/files/telegram/cancel", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ fileId: pf._id }),
+                              });
+                              queryClient.invalidateQueries({ queryKey: ["pending-files"] });
+                              setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" });
+                            } catch {
+                              setToast({ msg: "Failed to cancel.", type: "error" });
+                            }
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </>
             )}
             {status === "uploading" && (
@@ -1360,7 +1446,6 @@ export default function FileUpload() {
                     </div>
                   </div>
                   <div className="fu-file-actions">
-                    <input ref={resumeInputRef} type="file" hidden onChange={() => onResumeFileSelect(pf)} />
                     <button
                       className="fu-icon-btn"
                       style={{
@@ -1369,7 +1454,15 @@ export default function FileUpload() {
                         opacity: resumingId === pf._id ? 0.5 : 1,
                       }}
                       disabled={resumingId === pf._id}
-                      onClick={() => resumeInputRef.current?.click()}
+                      onClick={() => {
+                        const fileInput = document.createElement("input");
+                        fileInput.type = "file";
+                        fileInput.onchange = async () => {
+                          const f = fileInput.files?.[0];
+                          if (f) await handleResume(pf, f);
+                        };
+                        fileInput.click();
+                      }}
                     >
                       {resumingId === pf._id ? "⟳ Resuming..." : "⟳ Resume"}
                     </button>

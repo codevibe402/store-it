@@ -2,6 +2,9 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID!;
 const API_URL = (process.env.TELEGRAM_BOT_API_URL || "https://api.telegram.org").replace(/\/+$/, "");
 
+// Node 18+ fetch uses undici internally with keep-alive connection pooling by default.
+// No explicit configuration needed — connections to the same origin are reused automatically.
+
 function botUrl(method: string) {
   return `${API_URL}/bot${BOT_TOKEN}/${method}`;
 }
