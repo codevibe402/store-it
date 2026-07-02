@@ -14,14 +14,14 @@ type SearchResult = {
 };
 
 function getFileIcon(mimetype: string): string {
-  if (mimetype.startsWith("image/")) return "ðŸ–¼ï¸";
-  if (mimetype.startsWith("video/")) return "ðŸŽ¬";
-  if (mimetype.startsWith("audio/")) return "ðŸŽµ";
-  if (mimetype.includes("pdf")) return "ðŸ“„";
-  if (mimetype.includes("zip") || mimetype.includes("compressed")) return "ðŸ—œï¸";
-  if (mimetype.includes("word") || mimetype.includes("document")) return "ðŸ“";
-  if (mimetype.includes("sheet") || mimetype.includes("excel")) return "ðŸ“Š";
-  return "ðŸ“";
+  if (mimetype.startsWith("image/")) return "[IMG]";
+  if (mimetype.startsWith("video/")) return "[VID]";
+  if (mimetype.startsWith("audio/")) return "[AUD]";
+  if (mimetype.includes("pdf")) return "[PDF]";
+  if (mimetype.includes("zip") || mimetype.includes("compressed")) return "[ARC]";
+  if (mimetype.includes("word") || mimetype.includes("document")) return "[DOC]";
+  if (mimetype.includes("sheet") || mimetype.includes("excel")) return "[SHT]";
+  return "[FILE]";
 }
 
 function formatBytes(bytes: number): string {
@@ -97,7 +97,7 @@ export default function FileSearch({ onClose }: { onClose: () => void }) {
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Escape" && onClose()}
             />
-            <button className="fs-close" onClick={onClose}>âœ•</button>
+            <button className="fs-close" onClick={onClose}>x</button>
           </div>
           <div className="fs-body">
             {query.trim().length < 2 ? (

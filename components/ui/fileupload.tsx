@@ -1068,18 +1068,21 @@ export default function FileUpload() {
                     </button>
                     <button
                       className="fu-pending-btn cancel"
-                      onClick={async () => {
-                        try {
-                          await fetch("/api/files/telegram/cancel", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ fileId: pf._id }),
-                          });
+                      onClick={() => {
+                        queryClient.setQueryData<{
+                          files: FileType[]; folders: FolderType[]; pendingFiles: FileType[];
+                        }>(["dashboard"], (old) => old ? {
+                          ...old,
+                          pendingFiles: old.pendingFiles.filter((f) => f._id !== pf._id),
+                        } : old);
+                        setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" });
+                        fetch("/api/files/telegram/cancel", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ fileId: pf._id }),
+                        }).then(() => {
                           queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-                          setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" });
-                        } catch {
-                          setToast({ msg: "Failed to cancel.", type: "error" });
-                        }
+                        }).catch(() => {});
                       }}
                     >
                       Cancel
