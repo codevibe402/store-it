@@ -917,7 +917,10 @@ export default function FileUpload() {
           <div className="fu-topbar-brand">Storage</div>
           <div className="fu-topbar-actions">
             <button className="fu-topbar-btn" onClick={() => setShowSearch(true)}>
-              ðŸ”
+              🔍
+            </button>
+            <button className="fu-topbar-btn" onClick={() => router.push("/all-files")}>
+              All files
             </button>
             <button className="fu-topbar-btn accent" onClick={() => router.push("/sidebar")}>
               Browse by type
