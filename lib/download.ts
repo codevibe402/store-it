@@ -10,7 +10,7 @@ import { getFile, getFileDownloadUrl } from "@/lib/telegram";
 const PREFETCH = 4;
 
 async function computeHash(data: Uint8Array): Promise<string> {
-  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength))))
+  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(data.buffer as ArrayBuffer, data.byteOffset, data.byteLength))))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
