@@ -2,20 +2,22 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/[...nextauth]";
 import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/mongoose";
-import { getCacheControlHeader } from "@/lib/cdn";
 import Folder from "@/models/Folder";
 
-// GET /api/folders — list all folders for user
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   await connectDB();
-  const folders = await Folder.find({ owner_email: session.user.email }).sort({ createdAt: -1 }).lean();
-  
+
+  const folders = await Folder.find({ owner_email: session.user.email })
+    .select("name owner_id parent_id createdAt _id")
+    .sort({ createdAt: -1 })
+    .lean();
+
   const response = NextResponse.json(folders);
-  response.headers.set('Cache-Control', getCacheControlHeader('folders'));
-  
+  response.headers.set("Cache-Control", "private, max-age=30, stale-while-revalidate=60");
+
   return response;
 }
 

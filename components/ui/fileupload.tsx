@@ -210,36 +210,27 @@ export default function FileUpload() {
     };
   }, [isAuthenticated, searchQuery]);
   // ── Queries ───────────────────────────────────────────────────────────────────
-  const { data: files = [], isLoading: filesLoading } = useQuery<FileType[]>({
-    queryKey: ["files"],
+  const { data: dashboard, isLoading: dashboardLoading } = useQuery<{
+    files: FileType[];
+    folders: FolderType[];
+    pendingFiles: FileType[];
+  }>({
+    queryKey: ["dashboard"],
     queryFn: async () => {
-      const res = await fetch("/api/files/fetch");
-      if (!res.ok) throw new Error("Failed to fetch files");
-      return res.json();
-    },
-    enabled: isAuthenticated,
-  });
-
-  const { data: folders = [], isLoading: foldersLoading } = useQuery<FolderType[]>({
-    queryKey: ["folders"],
-    queryFn: async () => {
-      const res = await fetch("/api/folders");
-      if (!res.ok) throw new Error("Failed to fetch folders");
-      return res.json();
-    },
-    enabled: isAuthenticated,
-  });
-
-  const { data: pendingFiles = [], isLoading: pendingLoading } = useQuery<FileType[]>({
-    queryKey: ["pending-files"],
-    queryFn: async () => {
-      const res = await fetch("/api/files/fetch?status=pending,uploading,paused,fallback_cleanup,s3_pending");
-      if (!res.ok) throw new Error("Failed to fetch pending files");
+      const res = await fetch("/api/dashboard");
+      if (!res.ok) throw new Error("Failed to load dashboard");
       return res.json();
     },
     enabled: isAuthenticated,
     refetchInterval: 15000,
   });
+
+  const files = dashboard?.files ?? [];
+  const folders = dashboard?.folders ?? [];
+  const pendingFiles = dashboard?.pendingFiles ?? [];
+  const filesLoading = dashboardLoading;
+  const foldersLoading = dashboardLoading;
+  const pendingLoading = dashboardLoading;
 
   const uploadedFiles = files.filter((f) => f.status === "uploaded");
   const visibleFiles = uploadedFiles.filter((f) => f.folderId === currentFolderId);
@@ -269,7 +260,7 @@ export default function FileUpload() {
       if (!res.ok) throw await parseError(res, `Upload failed (${res.status})`);
       return res.json();
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["files"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
   });
 
   // ── Multipart upload ──────────────────────────────────────────────────────────
@@ -315,7 +306,7 @@ export default function FileUpload() {
         body: JSON.stringify({ key, uploadId, parts, fileId }),
       });
       if (!completeRes.ok) throw new Error("Failed to complete multipart upload");
-      queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       return completeRes.json();
     } finally {
       abortRef.current = null;
@@ -388,7 +379,7 @@ export default function FileUpload() {
     });
     if (!completeRes.ok) throw new Error("Failed to complete S3 multipart fallback");
 
-    queryClient.invalidateQueries({ queryKey: ["files"] });
+    queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     return completeRes.json();
   }
 
@@ -493,7 +484,7 @@ export default function FileUpload() {
 
           await s3FallbackUpload(file, hash, fileId, onProgress);
 
-          queryClient.invalidateQueries({ queryKey: ["files"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard"] });
           return;
         } catch (fallbackErr: any) {
           throw new Error(`Telegram upload failed and S3 fallback also failed: ${fallbackErr.message}`);
@@ -516,7 +507,7 @@ export default function FileUpload() {
     });
     if (!completeRes.ok) throw new Error("Failed to complete Telegram upload");
 
-    queryClient.invalidateQueries({ queryKey: ["files"] });
+    queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     return completeRes.json();
   }
 
@@ -667,7 +658,7 @@ export default function FileUpload() {
         body: JSON.stringify({ folderId: targetFolderId }),
       });
       if (!res.ok) throw new Error("Failed");
-      queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       setMoveTarget(null);
       setToast({ msg: `Moved to ${targetFolderId ? folders.find(f => f._id === targetFolderId)?.name : "root"}.`, type: "success" });
     } catch { setToast({ msg: "Move failed.", type: "error" }); }
@@ -686,7 +677,7 @@ export default function FileUpload() {
       const folder = await res.json();
       if (!res.ok) throw new Error(folder.error || "Failed");
 
-      queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       setMoveNewFolderName("");
       await moveFile(moveTarget, folder._id);
       setToast({ msg: `Created "${name}" and moved the file there.`, type: "success" });
@@ -702,7 +693,7 @@ export default function FileUpload() {
         body: JSON.stringify({ parentId: targetFolderId }),
       });
       if (!res.ok) throw new Error("Failed");
-      queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       setMoveFolderTarget(null);
       setToast({ msg: `Moved folder to ${targetFolderId ? folders.find(f => f._id === targetFolderId)?.name : "root"}.`, type: "success" });
     } catch { setToast({ msg: "Folder move failed.", type: "error" }); }
@@ -714,13 +705,13 @@ export default function FileUpload() {
       if (deleteTarget.type === "file") {
         const res = await fetch(`/api/files/${deleteTarget.item._id}`, { method: "DELETE" });
         if (!res.ok) throw new Error("Failed");
-        queryClient.invalidateQueries({ queryKey: ["files"] });
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] });
         setToast({ msg: `"${(deleteTarget.item as FileType).filename}" deleted.`, type: "success" });
       } else {
         const res = await fetch(`/api/folders/${deleteTarget.item._id}`, { method: "DELETE" });
         if (!res.ok) throw new Error("Failed");
-        queryClient.invalidateQueries({ queryKey: ["folders"] });
-        queryClient.invalidateQueries({ queryKey: ["files"] });
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] });
         if (currentFolderId === deleteTarget.item._id) setCurrentFolderId(null);
         setToast({ msg: `"${deleteTarget.item.name}" deleted.`, type: "success" });
       }
@@ -737,7 +728,7 @@ export default function FileUpload() {
         body: JSON.stringify({ name, parent_id: currentFolderId }),
       });
       if (!res.ok) throw new Error("Failed");
-      queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       setNewFolderName(""); setShowNewFolder(false);
       setToast({ msg: `Folder "${name}" created.`, type: "success" });
     } catch { setToast({ msg: "Could not create folder.", type: "error" }); }
@@ -769,7 +760,7 @@ export default function FileUpload() {
           });
         }
       } catch {}
-      queryClient.invalidateQueries({ queryKey: ["pending-files"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     }
 
     setStatus("idle"); setProgress(0);
@@ -790,7 +781,7 @@ export default function FileUpload() {
           body: JSON.stringify({ fileId: meta.fileId }),
         });
       } catch {}
-      queryClient.invalidateQueries({ queryKey: ["pending-files"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     }
 
     setStatus("idle"); setProgress(0);
@@ -849,8 +840,8 @@ export default function FileUpload() {
       setProgress(100);
       setStatus("success");
       setToast({ msg: `"${file.name}" upload resumed and completed!`, type: "success" });
-      queryClient.invalidateQueries({ queryKey: ["pending-files"] });
-      queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       setTimeout(() => setStatus("idle"), 3000);
     } catch (err: unknown) {
       const uploadError = err as UploadError;
@@ -1405,7 +1396,7 @@ export default function FileUpload() {
                                 headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({ fileId: pf._id }),
                               });
-                              queryClient.invalidateQueries({ queryKey: ["pending-files"] });
+                              queryClient.invalidateQueries({ queryKey: ["dashboard"] });
                               setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" });
                             } catch {
                               setToast({ msg: "Failed to cancel.", type: "error" });
@@ -1624,7 +1615,7 @@ export default function FileUpload() {
                             body: JSON.stringify({ fileId: pf._id }),
                           });
                           if (!res.ok) throw new Error("Failed");
-                          queryClient.invalidateQueries({ queryKey: ["pending-files"] });
+                          queryClient.invalidateQueries({ queryKey: ["dashboard"] });
                           setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" });
                         } catch {
                           setToast({ msg: "Failed to cancel upload.", type: "error" });

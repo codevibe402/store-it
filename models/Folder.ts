@@ -18,5 +18,8 @@ const FolderSchema = new Schema<IFolder>(
   { timestamps: true }
 );
 
+FolderSchema.index({ owner_email: 1, createdAt: -1 });
+FolderSchema.index({ owner_id: 1, parent_id: 1 });
+
 export default mongoose.models.Folder ||
   mongoose.model<IFolder>("Folder", FolderSchema);

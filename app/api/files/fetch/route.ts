@@ -1,14 +1,11 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/[...nextauth]";
 import connectDB from "@/lib/mongoose";
-import { getCacheControlHeader } from "@/lib/cdn";
 import File from "@/models/File";
 import { NextRequest, NextResponse } from "next/server";
 
-
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
-
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -18,28 +15,29 @@ export async function GET(req: NextRequest) {
 
     const statusParam = req.nextUrl.searchParams.get("status") || "uploaded";
     const statuses = statusParam.split(",").map((s) => s.trim()).filter(Boolean);
+    const limitParam = req.nextUrl.searchParams.get("limit");
+    const limit = limitParam ? Math.min(Math.max(parseInt(limitParam) || 50, 1), 500) : undefined;
 
-    const files = await File.find({
+    let query = File.find({
       owner_email: session.user.email,
       status: statuses.length === 1 ? statuses[0] : { $in: statuses },
     })
-      .sort({ createdAt: -1 })
-      .lean();
+      .select("_id filename mimetype size folderId folders_id backend status createdAt updatedAt owner_id hash")
+      .sort({ createdAt: -1 });
 
-    // ── NEW: return grouped structure if ?grouped=true ──────────────
-    
+    if (limit) query = query.limit(limit);
+
+    const files = await query.lean();
 
     const normalizedFiles = files.map((file) => ({
       ...file,
       folderId: file.folderId?.toString?.() ?? file.folders_id?.toString?.() ?? null,
     }));
 
-    // ── Add cache headers for 5 minutes ──────────────────────────────
     const response = NextResponse.json(normalizedFiles);
-    response.headers.set('Cache-Control', getCacheControlHeader('metadata'));
-    
-    return response;
+    response.headers.set("Cache-Control", "private, max-age=30, stale-while-revalidate=60");
 
+    return response;
   } catch (error) {
     console.error("Failed to fetch files:", error);
     return NextResponse.json(

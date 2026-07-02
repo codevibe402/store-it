@@ -35,5 +35,8 @@ const FileSchema = new Schema({
 FileSchema.index({ owner_id: 1, hash: 1, status: 1 });
 FileSchema.index({ owner_id: 1, filename: 1, folderId: 1 });
 FileSchema.index({ filename: "text", searchText: "text" });
+FileSchema.index({ owner_email: 1, status: 1, createdAt: -1 });
+FileSchema.index({ owner_id: 1, status: 1, createdAt: -1 });
+FileSchema.index({ owner_id: 1, folderId: 1, status: 1 });
 
 export default mongoose.models.File|| mongoose.model('File', FileSchema);
