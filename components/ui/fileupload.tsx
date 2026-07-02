@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect, DragEvent, ChangeEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -917,7 +917,7 @@ export default function FileUpload() {
           <div className="fu-topbar-brand">Storage</div>
           <div className="fu-topbar-actions">
             <button className="fu-topbar-btn" onClick={() => setShowSearch(true)}>
-              🔍
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
             </button>
             <button className="fu-topbar-btn" onClick={() => router.push("/all-files")}>
               All files
@@ -1011,63 +1011,16 @@ export default function FileUpload() {
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
-            onClick={() => status !== "uploading" && inputRef.current?.click()}
+            onClick={() => inputRef.current?.click()}
           >
             <input ref={inputRef} type="file" hidden onChange={onInputChange} />
-
-            {status === "idle" && (
-              <>
-                <div className="fu-dropzone-icon"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></div>
-                <div className="fu-dropzone-title">
-                  Drop your file here{currentFolder ? ` into "${currentFolder.name}"` : ""}
-                </div>
-                <div className="fu-dropzone-sub">
-                  or <span>browse</span> -- under 10 MB uploads instantly, larger files use multipart
-                </div>
-              </>
-            )}
-            {status === "uploading" && (
-              <div className="fu-progress-wrap" onClick={(e) => e.stopPropagation()}>
-                <div className="fu-progress-row">
-                  <span className="fu-progress-label">Uploading</span>
-                  <span className="fu-progress-pct">{progress}%</span>
-                </div>
-                <div className="fu-bar-bg"><div className="fu-bar-fill" style={{ width: `${progress}%` }} /></div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button className="fu-cancel-btn" onClick={handlePause}>Pause</button>
-                  <button className="fu-cancel-btn" onClick={handleCancel}>Cancel</button>
-                </div>
-              </div>
-            )}
-            {status === "success" && (
-              <div className="fu-status success"><div className="fu-status-dot" /> File uploaded successfully</div>
-            )}
-            {status === "error" && (
-              <>
-                <div className="fu-status error">{errorMsg || "Upload failed"}</div>
-                <div className="fu-dropzone-sub" style={{ marginTop: 4 }}>Click to try again</div>
-              </>
-            )}
-            {status === "duplicate" && duplicateFile && (
-              <div className="fu-duplicate" onClick={(e) => e.stopPropagation()}>
-                <div className="fu-duplicate-title">Duplicate file detected</div>
-                <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                  <span>{duplicateFile.filename}</span> already exists in your storage.
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button className="fu-dup-open-btn" onClick={async () => openFile(duplicateFile)}>
-                    Open existing
-                  </button>
-                  <button
-                    className="fu-dup-open-btn"
-                    style={{ background: "rgba(108,142,255,0.1)", borderColor: "rgba(108,142,255,0.3)", color: "var(--accent)" }}
-                    onClick={() => downloadFile(duplicateFile)}
-                  >
-                    Download
-                  </button>
-                </div>
-              </div>
-            )}
+            <div className="fu-dropzone-icon"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></div>
+            <div className="fu-dropzone-title">
+              Drop your file here{currentFolder ? ` into "${currentFolder.name}"` : ""}
+            </div>
+            <div className="fu-dropzone-sub">
+              or <span>browse</span> -- under 10 MB uploads instantly, larger files use multipart
+            </div>
           </div>
 
           {/* Active Uploads */}
