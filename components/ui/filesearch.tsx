@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState, useEffect, useRef } from "react";
 
 type SearchResult = {
@@ -14,14 +14,14 @@ type SearchResult = {
 };
 
 function getFileIcon(mimetype: string): string {
-  if (mimetype.startsWith("image/")) return "🖼️";
-  if (mimetype.startsWith("video/")) return "🎬";
-  if (mimetype.startsWith("audio/")) return "🎵";
-  if (mimetype.includes("pdf")) return "📄";
-  if (mimetype.includes("zip") || mimetype.includes("compressed")) return "🗜️";
-  if (mimetype.includes("word") || mimetype.includes("document")) return "📝";
-  if (mimetype.includes("sheet") || mimetype.includes("excel")) return "📊";
-  return "📁";
+  if (mimetype.startsWith("image/")) return "ðŸ–¼ï¸";
+  if (mimetype.startsWith("video/")) return "ðŸŽ¬";
+  if (mimetype.startsWith("audio/")) return "ðŸŽµ";
+  if (mimetype.includes("pdf")) return "ðŸ“„";
+  if (mimetype.includes("zip") || mimetype.includes("compressed")) return "ðŸ—œï¸";
+  if (mimetype.includes("word") || mimetype.includes("document")) return "ðŸ“";
+  if (mimetype.includes("sheet") || mimetype.includes("excel")) return "ðŸ“Š";
+  return "ðŸ“";
 }
 
 function formatBytes(bytes: number): string {
@@ -86,66 +86,6 @@ export default function FileSearch({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <style>{`
-        .fs-overlay {
-          position: fixed; inset: 0; z-index: 900;
-          background: rgba(0,0,0,0.5);
-          display: flex; align-items: flex-start; justify-content: center;
-          padding-top: 80px;
-        }
-        .fs-panel {
-          background: var(--surface2); border: 1px solid var(--border);
-          border-radius: 16px; width: 560px; max-width: 94vw;
-          max-height: 70vh; display: flex; flex-direction: column;
-          box-shadow: 0 16px 64px rgba(0,0,0,0.5);
-          overflow: hidden;
-        }
-        .fs-header {
-          display: flex; align-items: center; gap: 10px;
-          padding: 14px 16px; border-bottom: 1px solid var(--border);
-        }
-        .fs-input {
-          flex: 1; background: var(--surface); border: 1px solid var(--border);
-          color: var(--text); border-radius: 10px; padding: 10px 14px;
-          font-size: 0.9rem; font-family: 'DM Sans', sans-serif; outline: none;
-        }
-        .fs-input:focus { border-color: var(--accent); }
-        .fs-close {
-          background: none; border: none; color: var(--text-muted);
-          font-size: 1.2rem; cursor: pointer; padding: 4px 8px; border-radius: 6px;
-          font-family: 'DM Sans', sans-serif;
-        }
-        .fs-close:hover { background: var(--surface); color: var(--text); }
-        .fs-body {
-          flex: 1; overflow-y: auto; padding: 12px 16px;
-        }
-        .fs-hint {
-          text-align: center; color: var(--text-muted); font-size: 0.8rem;
-          padding: 32px 0;
-        }
-        .fs-result {
-          display: flex; align-items: center; gap: 10px;
-          padding: 10px 12px; border-radius: 10px;
-          cursor: pointer; transition: background 0.12s;
-        }
-        .fs-result:hover { background: var(--surface); }
-        .fs-result-icon { font-size: 1.2rem; flex-shrink: 0; }
-        .fs-result-info { flex: 1; min-width: 0; }
-        .fs-result-name {
-          font-size: 0.85rem; font-weight: 500; color: var(--text);
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-        .fs-result-snippet {
-          font-size: 0.75rem; color: var(--text-muted);
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;
-        }
-        .fs-result-meta {
-          font-size: 0.7rem; color: var(--text-muted); flex-shrink: 0;
-        }
-        .fs-spinner {
-          text-align: center; padding: 20px; color: var(--text-muted);
-        }
-      `}</style>
       <div className="fs-overlay" onClick={onClose}>
         <div className="fs-panel" onClick={(e) => e.stopPropagation()}>
           <div className="fs-header">
@@ -157,7 +97,7 @@ export default function FileSearch({ onClose }: { onClose: () => void }) {
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Escape" && onClose()}
             />
-            <button className="fs-close" onClick={onClose}>✕</button>
+            <button className="fs-close" onClick={onClose}>âœ•</button>
           </div>
           <div className="fs-body">
             {query.trim().length < 2 ? (

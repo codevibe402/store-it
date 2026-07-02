@@ -1,17 +1,17 @@
-"use client";
+﻿"use client";
 import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect, DragEvent, ChangeEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {useReducer} from "react"
 import FileSearch from "./filesearch";
-// ── Constants ────────────────────────────────────────────────────────────────
+// â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 const CHUNK_SIZE = 10 * 1024 * 1024;
 const TELEGRAM_CHUNK_SIZE = 4 * 1024 * 1024;
 const TELEGRAM_CONCURRENCY = 6;
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 type UploadStatus = "idle" | "uploading" | "success" | "error" | "duplicate";
 
 type FileType = {
@@ -70,8 +70,13 @@ type UploadError = Error & {
   isDuplicate?: boolean;
   existingFile?: FileType;
 };
+type TelegramChunkError = Error & {
+  canFallbackToS3?: boolean;
+  chunkIndex?: number;
+  isCancelled?: boolean;
+};
 
-// ── Utils ─────────────────────────────────────────────────────────────────────
+// â”€â”€ Utils â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function getFileHash(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
   const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
@@ -87,15 +92,38 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+function abortableDelay(ms: number, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(Object.assign(new Error("Upload cancelled"), { isCancelled: true }));
+      return;
+    }
+
+    const timeout = window.setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(timeout);
+        reject(Object.assign(new Error("Upload cancelled"), { isCancelled: true }));
+      },
+      { once: true },
+    );
+  });
+}
+
+function isAbortLike(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 function getFileIcon(mimetype: string): string {
-  if (mimetype.startsWith("image/")) return "🖼️";
-  if (mimetype.startsWith("video/")) return "🎬";
-  if (mimetype.startsWith("audio/")) return "🎵";
-  if (mimetype.includes("pdf")) return "📄";
-  if (mimetype.includes("zip") || mimetype.includes("compressed")) return "🗜️";
-  if (mimetype.includes("word") || mimetype.includes("document")) return "📝";
-  if (mimetype.includes("sheet") || mimetype.includes("excel")) return "📊";
-  return "📁";
+  if (mimetype.startsWith("image/")) return "ðŸ–¼ï¸";
+  if (mimetype.startsWith("video/")) return "ðŸŽ¬";
+  if (mimetype.startsWith("audio/")) return "ðŸŽµ";
+  if (mimetype.includes("pdf")) return "ðŸ“„";
+  if (mimetype.includes("zip") || mimetype.includes("compressed")) return "ðŸ—œï¸";
+  if (mimetype.includes("word") || mimetype.includes("document")) return "ðŸ“";
+  if (mimetype.includes("sheet") || mimetype.includes("excel")) return "ðŸ“Š";
+  return "ðŸ“";
 }
 type UploadAction= 
     | { type: "UPLOAD_START" }
@@ -116,7 +144,7 @@ function reducer(state: uploadstate,action: UploadAction):uploadstate{
 
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function FileUpload() {
   const [state, dispatch] = useReducer(reducer, initialState);
 
@@ -183,7 +211,7 @@ export default function FileUpload() {
     return () => window.removeEventListener("click", close);
   }, []);
 
-  // ── Queries ───────────────────────────────────────────────────────────────────
+  // â”€â”€ Queries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const { data: dashboard, isLoading: dashboardLoading } = useQuery<{
     files: FileType[];
     folders: FolderType[];
@@ -215,7 +243,7 @@ export default function FileUpload() {
     return new Error(data.error || fallback);
   }
 
-  // ── Small upload ──────────────────────────────────────────────────────────────
+  // â”€â”€ Small upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const smallUploadMutation = useMutation({
     mutationFn: async ({ file, hash }: { file: File; hash: string }) => {
       const formData = new FormData();
@@ -237,7 +265,7 @@ export default function FileUpload() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
   });
 
-  // ── Multipart upload ──────────────────────────────────────────────────────────
+  // â”€â”€ Multipart upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async function multipartUpload(file: File, hash: string, onProgress: (pct: number) => void) {
     const initRes = await fetch("/api/files/upload/multipart/init", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -409,12 +437,21 @@ export default function FileUpload() {
         let success = false;
         for (let attempt = 0; attempt < 3 && !success; attempt++) {
           try {
+            if (cancelRef.current || pauseRef.current || controller.signal.aborted) {
+              throw { isCancelled: true };
+            }
             const res = await fetch("/api/files/telegram/chunk", {
               method: "POST", body: formData, signal: controller.signal,
             });
+            if (cancelRef.current || pauseRef.current || controller.signal.aborted) {
+              throw { isCancelled: true };
+            }
             if (!res.ok) {
-              const errBody = await res.json().catch(() => ({}));
-              const err = new Error(`Status ${res.status}`) as any;
+              const errBody = await res.json().catch(() => ({})) as {
+                canFallbackToS3?: boolean;
+                chunkIndex?: number;
+              };
+              const err = new Error(`Status ${res.status}`) as TelegramChunkError;
               err.canFallbackToS3 = errBody.canFallbackToS3 === true;
               err.chunkIndex = errBody.chunkIndex;
               throw err;
@@ -422,10 +459,13 @@ export default function FileUpload() {
             success = true;
             uploadedBytes += chunkBlob.size;
             onProgress(Math.round((uploadedBytes / file.size) * 100));
-          } catch (err: any) {
-            if (cancelRef.current || pauseRef.current || controller.signal.aborted) throw { isCancelled: true };
-            if (err.canFallbackToS3) throw err;
-            if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+          } catch (err: unknown) {
+            const chunkError = err as TelegramChunkError;
+            if (cancelRef.current || pauseRef.current || controller.signal.aborted || isAbortLike(err) || chunkError?.isCancelled) {
+              throw { isCancelled: true };
+            }
+            if (chunkError.canFallbackToS3) throw chunkError;
+            if (attempt < 2) await abortableDelay(1000 * Math.pow(2, attempt), controller.signal);
             else throw new Error(`Chunk ${index} failed after 3 attempts`);
           }
         }
@@ -435,12 +475,13 @@ export default function FileUpload() {
     const workers = Array.from({ length: TELEGRAM_CONCURRENCY }, () => worker());
     try {
       await Promise.all(workers);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const uploadError = err as TelegramChunkError;
       abortRef.current = null;
       cancelRef.current = true;
       controller.abort();
 
-      if (err?.canFallbackToS3) {
+      if (uploadError?.canFallbackToS3) {
         currentFileIdRef.current = null;
         currentUploadRef.current = null;
         try {
@@ -460,14 +501,15 @@ export default function FileUpload() {
 
           queryClient.invalidateQueries({ queryKey: ["dashboard"] });
           return;
-        } catch (fallbackErr: any) {
-          throw new Error(`Telegram upload failed and S3 fallback also failed: ${fallbackErr.message}`);
+        } catch (fallbackErr: unknown) {
+          const message = fallbackErr instanceof Error ? fallbackErr.message : "Unknown fallback error";
+          throw new Error(`Telegram upload failed and S3 fallback also failed: ${message}`);
         }
       }
 
       currentFileIdRef.current = null;
       currentUploadRef.current = null;
-      throw err;
+      throw uploadError;
     }
     abortRef.current = null;
     currentFileIdRef.current = null;
@@ -503,7 +545,7 @@ export default function FileUpload() {
     return (await res.json()).url;
   };
 
-  // ── File actions ──────────────────────────────────────────────────────────────
+  // â”€â”€ File actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const openFile = async (file: FileType) => {
     if (file.backend === "telegram") {
       window.open(`/api/files/telegram/${file._id}/download`, "_blank");
@@ -708,17 +750,32 @@ export default function FileUpload() {
     } catch { setToast({ msg: "Could not create folder.", type: "error" }); }
   };
 
-  // ── Upload flow ───────────────────────────────────────────────────────────────
+  // â”€â”€ Upload flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleCancel = async () => {
     cancelRef.current = true;
+    pauseRef.current = false;
     abortRef.current?.abort();
     abortRef.current = null;
     if (intervalRef.current) clearInterval(intervalRef.current);
 
     const meta = currentUploadRef.current;
+    currentFileIdRef.current = null;
+    currentUploadRef.current = null;
+    setStatus("idle");
+    setProgress(0);
+    if (meta?.fileId) {
+      queryClient.setQueryData<{
+        files: FileType[];
+        folders: FolderType[];
+        pendingFiles: FileType[];
+      }>(["dashboard"], (old) => old ? {
+        ...old,
+        pendingFiles: old.pendingFiles.filter((file) => file._id !== meta.fileId),
+      } : old);
+    }
+    setToast({ msg: "Upload cancelled.", type: "warn" });
+
     if (meta) {
-      currentFileIdRef.current = null;
-      currentUploadRef.current = null;
       try {
         if (meta.backend === "telegram") {
           await fetch("/api/files/telegram/cancel", {
@@ -733,12 +790,12 @@ export default function FileUpload() {
             body: JSON.stringify({ fileId: meta.fileId, uploadId: meta.uploadId, key: meta.key }),
           });
         }
-      } catch {}
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      } catch {
+        setToast({ msg: "Upload stopped locally, but cleanup may need a refresh.", type: "warn" });
+      } finally {
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      }
     }
-
-    setStatus("idle"); setProgress(0);
-    setToast({ msg: "Upload cancelled.", type: "warn" });
   };
 
   const handlePause = async () => {
@@ -847,398 +904,20 @@ export default function FileUpload() {
 
   const currentFolder = folders.find((f) => f._id === currentFolderId);
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
     <>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap');
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-        .fu-root, .fu-ctx, .fu-overlay, .fu-toast {
-          --bg: #0d0f14; --surface: #13161e; --surface2: #1a1e28;
-          --border: #252a38; --border-hover: #353c52;
-          --accent: #6c8eff; --accent-glow: rgba(108,142,255,0.15); --accent2: #a78bfa;
-          --success: #34d399; --warn: #fbbf24; --error: #f87171;
-          --text: #e8eaf0; --text-muted: #6b7280; --text-dim: #9ca3af;
-          --danger: #f87171; --folder-color: #fbbf24;
-        }
-        .fu-root {
-          font-family: 'DM Sans', sans-serif;
-          background: var(--bg); min-height: 100vh; padding: 48px 24px; color: var(--text);
-        }
-
-        /* ── Top nav bar ── */
-        .fu-topbar {
-          max-width: 900px; margin: 0 auto 28px;
-          display: flex; align-items: center; justify-content: space-between;
-        }
-        .fu-topbar-brand {
-          font-family: 'Syne', sans-serif; font-size: 1.5rem; font-weight: 800;
-          letter-spacing: -0.03em;
-          background: linear-gradient(135deg, #e8eaf0 0%, #6c8eff 100%);
-          -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-        }
-        .fu-topbar-actions { display: flex; gap: 8px; }
-        .fu-topbar-btn {
-          display: flex; align-items: center; gap: 6px;
-          padding: 7px 14px; border-radius: 9px;
-          font-family: 'DM Sans', sans-serif; font-size: 0.8rem; font-weight: 500;
-          cursor: pointer; border: 1px solid var(--border);
-          background: var(--surface2); color: var(--text-dim); transition: all 0.15s;
-        }
-        .fu-topbar-btn:hover { border-color: var(--border-hover); color: var(--text); }
-        .fu-topbar-btn.accent { border-color: rgba(108,142,255,0.3); color: var(--accent); background: var(--accent-glow); }
-        .fu-topbar-btn.accent:hover { background: rgba(108,142,255,0.25); }
-
-        /* ── Folder tabs ── */
-        .fu-tabs-wrap {
-          max-width: 900px; margin: 0 auto 20px;
-          display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-        }
-        .fu-tab {
-          display: flex; align-items: center; gap: 6px;
-          padding: 6px 14px; border-radius: 99px; cursor: pointer;
-          border: 1px solid var(--border); background: none; color: var(--text-muted);
-          font-family: 'DM Sans', sans-serif; font-size: 0.8rem; font-weight: 500;
-          transition: all 0.15s; white-space: nowrap;
-        }
-        .fu-tab:hover { border-color: var(--border-hover); color: var(--text); background: var(--surface2); }
-        .fu-tab.active { background: var(--accent-glow); border-color: rgba(108,142,255,0.3); color: var(--accent); }
-        .fu-tab-count {
-          background: var(--surface2); border: 1px solid var(--border);
-          color: var(--text-muted); font-size: 0.68rem;
-          padding: 1px 7px; border-radius: 99px; min-width: 20px; text-align: center;
-        }
-        .fu-tab.active .fu-tab-count { background: rgba(108,142,255,0.15); border-color: rgba(108,142,255,0.2); color: var(--accent); }
-        .fu-tab-new {
-          display: flex; align-items: center; gap: 5px;
-          padding: 6px 12px; border-radius: 99px;
-          border: 1px dashed var(--border); background: none; color: var(--text-muted);
-          font-family: 'DM Sans', sans-serif; font-size: 0.78rem; cursor: pointer;
-          transition: all 0.15s;
-        }
-        .fu-tab-new:hover { border-color: var(--accent); color: var(--accent); }
-        .fu-new-folder-inline {
-          display: flex; align-items: center; gap: 6px;
-        }
-        .fu-new-folder-input-inline {
-          background: var(--surface2); border: 1px solid var(--accent);
-          border-radius: 99px; padding: 5px 14px; color: var(--text);
-          font-family: 'DM Sans', sans-serif; font-size: 0.8rem; outline: none; width: 160px;
-        }
-        .fu-new-folder-input-inline::placeholder { color: var(--text-muted); }
-        .fu-btn-pill {
-          padding: 5px 12px; border-radius: 99px;
-          font-family: 'DM Sans', sans-serif; font-size: 0.75rem; font-weight: 500;
-          cursor: pointer; border: 1px solid var(--border);
-          background: var(--surface2); color: var(--text-dim); transition: all 0.15s;
-        }
-        .fu-btn-pill.accent { background: var(--accent-glow); border-color: rgba(108,142,255,0.3); color: var(--accent); }
-        .fu-btn-pill.accent:hover { background: rgba(108,142,255,0.25); }
-
-        /* ── Main content ── */
-        .fu-shell { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 20px; align-items: start; }
-        .fu-content { max-width: 900px; width: 100%; display: flex; flex-direction: column; gap: 24px; }
-        .fu-insights {
-          background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
-          padding: 16px; position: sticky; top: 24px; display: flex; flex-direction: column; gap: 16px;
-        }
-        .fu-insight-title { font-family: 'Syne', sans-serif; font-size: 0.92rem; font-weight: 700; color: var(--text); }
-        .fu-search-input {
-          width: 100%; background: var(--surface2); border: 1px solid var(--border);
-          border-radius: 10px; padding: 10px 12px; color: var(--text);
-          font-family: 'DM Sans', sans-serif; font-size: 0.82rem; outline: none;
-        }
-        .fu-search-input:focus { border-color: rgba(108,142,255,0.45); }
-        .fu-search-result {
-          border: 1px solid var(--border); background: rgba(255,255,255,0.02);
-          border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 5px;
-        }
-        .fu-search-result button { align-self: flex-start; }
-        .fu-search-name { font-size: 0.8rem; font-weight: 600; color: var(--text); }
-        .fu-search-snippet { font-size: 0.7rem; color: var(--text-muted); line-height: 1.45; }
-        .fu-trust-card { border: 1px solid var(--border); border-radius: 10px; padding: 11px; background: var(--surface2); }
-        .fu-trust-label { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 4px; }
-        .fu-trust-value { font-size: 0.88rem; color: var(--text); font-weight: 700; }
-        @media (max-width: 1050px) { .fu-shell { grid-template-columns: 1fr; } .fu-insights { position: static; } }
-
-        /* Header */
-        .fu-header-sub { color: var(--text-muted); font-size: 0.85rem; font-weight: 300; margin-top: 4px; }
-        .fu-header-actions { display: flex; gap: 8px; margin-top: 12px; }
-        .fu-action-btn {
-          display: flex; align-items: center; gap: 6px;
-          padding: 7px 13px; border-radius: 8px; font-family: 'DM Sans', sans-serif;
-          font-size: 0.78rem; font-weight: 500; cursor: pointer;
-          border: 1px solid var(--border); background: var(--surface2); color: var(--text-dim);
-          transition: all 0.15s;
-        }
-        .fu-action-btn:hover { border-color: var(--border-hover); color: var(--text); }
-
-        /* ── Drop zone ── */
-        .fu-dropzone {
-          background: var(--surface); border: 1.5px dashed var(--border);
-          border-radius: 16px; padding: 40px 32px;
-          display: flex; flex-direction: column; align-items: center;
-          justify-content: center; gap: 12px; cursor: pointer;
-          transition: all 0.2s ease; position: relative; overflow: hidden;
-          min-height: 180px; text-align: center;
-        }
-        .fu-dropzone::before {
-          content: ''; position: absolute; inset: 0;
-          background: radial-gradient(ellipse at 50% 0%, var(--accent-glow) 0%, transparent 70%);
-          opacity: 0; transition: opacity 0.3s;
-        }
-        .fu-dropzone:hover::before, .fu-dropzone.dragging::before { opacity: 1; }
-        .fu-dropzone:hover, .fu-dropzone.dragging { border-color: var(--accent); border-style: solid; transform: translateY(-1px); }
-        .fu-dropzone-icon {
-          width: 48px; height: 48px; background: var(--surface2);
-          border: 1px solid var(--border); border-radius: 12px;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 22px; margin-bottom: 2px; transition: transform 0.2s;
-        }
-        .fu-dropzone:hover .fu-dropzone-icon { transform: scale(1.08); }
-        .fu-dropzone-title { font-family: 'Syne', sans-serif; font-size: 0.95rem; font-weight: 600; color: var(--text); }
-        .fu-dropzone-sub { font-size: 0.78rem; color: var(--text-muted); }
-        .fu-dropzone-sub span { color: var(--accent); font-weight: 500; }
-
-        .fu-pending-banner {
-          width: 100%; margin-top: 12px; padding: 12px 14px;
-          background: rgba(251,191,36,0.06); border: 1px solid rgba(251,191,36,0.2);
-          border-radius: 10px; display: flex; flex-direction: column; gap: 8px;
-        }
-        .fu-pending-banner-title {
-          font-size: 0.78rem; font-weight: 600; color: var(--warn);
-        }
-        .fu-pending-row {
-          display: flex; align-items: center; gap: 8px;
-        }
-        .fu-pending-name {
-          font-size: 0.75rem; color: var(--text); flex: 1; overflow: hidden;
-          text-overflow: ellipsis; white-space: nowrap;
-        }
-        .fu-pending-meta {
-          font-size: 0.68rem; color: var(--text-muted); flex-shrink: 0;
-        }
-        .fu-pending-btn {
-          flex-shrink: 0; padding: 3px 10px; border-radius: 6px;
-          font-family: 'DM Sans', sans-serif; font-size: 0.7rem; font-weight: 500;
-          cursor: pointer; border: 1px solid var(--border); background: var(--surface2);
-          transition: all 0.15s; color: var(--text-dim);
-        }
-        .fu-pending-btn.resume { color: var(--warn); border-color: rgba(251,191,36,0.3); }
-        .fu-pending-btn.resume:hover:not(:disabled) { background: rgba(251,191,36,0.1); }
-        .fu-pending-btn.cancel { color: var(--error); border-color: rgba(248,113,113,0.25); }
-        .fu-pending-btn.cancel:hover { background: rgba(248,113,113,0.08); }
-        .fu-pending-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        .fu-progress-wrap { width: 100%; display: flex; flex-direction: column; gap: 10px; }
-        .fu-progress-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; }
-        .fu-progress-label { color: var(--text-dim); font-weight: 500; }
-        .fu-progress-pct { color: var(--accent); font-family: 'Syne', sans-serif; font-weight: 700; }
-        .fu-bar-bg { width: 100%; height: 5px; background: var(--surface2); border-radius: 99px; overflow: hidden; }
-        .fu-bar-fill {
-          height: 100%;
-          background: linear-gradient(90deg, var(--accent) 0%, var(--accent2) 100%);
-          border-radius: 99px; transition: width 0.15s ease;
-        }
-        .fu-cancel-btn {
-          align-self: center; background: transparent; border: 1px solid var(--border);
-          color: var(--text-muted); font-family: 'DM Sans', sans-serif;
-          font-size: 0.78rem; padding: 5px 14px; border-radius: 8px; cursor: pointer; transition: all 0.15s;
-        }
-        .fu-cancel-btn:hover { border-color: var(--error); color: var(--error); }
-        .fu-status { display: flex; align-items: center; gap: 8px; font-size: 0.88rem; font-weight: 500; }
-        .fu-status.success { color: var(--success); }
-        .fu-status.error   { color: var(--error); }
-        .fu-status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1.2s infinite; }
-        @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.3)} }
-        .fu-duplicate {
-          background: rgba(251,191,36,0.07); border: 1px solid rgba(251,191,36,0.25);
-          border-radius: 10px; padding: 14px 16px;
-          display: flex; flex-direction: column; gap: 10px; width: 100%; text-align: left;
-        }
-        .fu-duplicate-title { font-size: 0.85rem; font-weight: 600; color: var(--warn); }
-        .fu-dup-open-btn {
-          background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3);
-          color: var(--warn); font-family: 'DM Sans', sans-serif;
-          font-size: 0.78rem; font-weight: 500; padding: 6px 14px;
-          border-radius: 7px; cursor: pointer; transition: all 0.15s; align-self: flex-start;
-        }
-        .fu-dup-open-btn:hover { background: rgba(251,191,36,0.2); }
-
-        /* ── Folder grid ── */
-        .fu-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-        .fu-section-title { font-family: 'Syne', sans-serif; font-size: 0.9rem; font-weight: 700; color: var(--text); }
-        .fu-section-count {
-          font-size: 0.72rem; background: var(--surface2); border: 1px solid var(--border);
-          color: var(--text-muted); padding: 2px 10px; border-radius: 99px;
-        }
-        .fu-folder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }
-        .fu-folder-card {
-          background: var(--surface); border: 1px solid var(--border);
-          border-radius: 12px; padding: 16px 14px;
-          display: flex; flex-direction: column; gap: 8px;
-          cursor: pointer; transition: all 0.15s; position: relative;
-        }
-        .fu-folder-card:hover { border-color: rgba(251,191,36,0.35); transform: translateY(-2px); background: rgba(251,191,36,0.04); }
-        .fu-folder-icon { font-size: 26px; }
-        .fu-folder-name { font-size: 0.8rem; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .fu-folder-count { font-size: 0.68rem; color: var(--text-muted); }
-        .fu-folder-card-opts {
-          position: absolute; top: 8px; right: 8px;
-          background: none; border: none; color: var(--text-muted);
-          cursor: pointer; font-size: 13px; padding: 2px 5px; border-radius: 5px;
-          opacity: 0; transition: opacity 0.15s;
-        }
-        .fu-folder-card:hover .fu-folder-card-opts { opacity: 1; }
-
-        /* ── File list ── */
-        .fu-file-card {
-          background: var(--surface); border: 1px solid var(--border);
-          border-radius: 12px; padding: 12px 14px;
-          display: flex; align-items: center; gap: 12px;
-          margin-bottom: 7px; transition: all 0.15s;
-        }
-        .fu-file-card:hover { border-color: var(--border-hover); transform: translateX(2px); }
-        .fu-file-icon {
-          font-size: 20px; flex-shrink: 0; width: 38px; height: 38px;
-          background: var(--surface2); border-radius: 9px;
-          display: flex; align-items: center; justify-content: center;
-        }
-        .fu-file-info { flex: 1; overflow: hidden; }
-        .fu-file-name { font-size: 0.85rem; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .fu-file-meta { font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; }
-        .fu-file-actions { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
-        .fu-icon-btn {
-          background: var(--surface2); border: 1px solid var(--border);
-          color: var(--text-muted); font-size: 0.72rem; font-weight: 500;
-          padding: 5px 10px; border-radius: 7px; cursor: pointer; transition: all 0.15s;
-          white-space: nowrap;
-        }
-        .fu-icon-btn:hover { background: var(--surface); border-color: var(--border-hover); color: var(--text); }
-        .fu-icon-btn.open  { color: var(--accent); border-color: rgba(108,142,255,0.25); }
-        .fu-icon-btn.open:hover  { background: var(--accent-glow); }
-        .fu-icon-btn.share { color: var(--success); border-color: rgba(52,211,153,0.25); }
-        .fu-icon-btn.share:hover { background: rgba(52,211,153,0.1); }
-        .fu-icon-btn.danger:hover { color: var(--error); border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.08); }
-
-        /* ── Context menu ── */
-        .fu-ctx {
-          position: fixed; background: var(--surface2); border: 1px solid var(--border);
-          border-radius: 12px; padding: 6px; min-width: 170px; z-index: 1000;
-          box-shadow: 0 12px 40px rgba(0,0,0,0.5); animation: ctxIn 0.12s ease;
-        }
-        @keyframes ctxIn { from{opacity:0;transform:scale(0.95)} to{opacity:1;transform:scale(1)} }
-        .fu-ctx-item {
-          display: flex; align-items: center; gap: 8px;
-          padding: 8px 12px; border-radius: 8px; cursor: pointer;
-          font-size: 0.82rem; color: var(--text-dim); transition: all 0.1s; border: none;
-          background: none; width: 100%; text-align: left; font-family: 'DM Sans', sans-serif;
-        }
-        .fu-ctx-item:hover { background: var(--surface); color: var(--text); }
-        .fu-ctx-item.danger:hover { color: var(--error); background: rgba(248,113,113,0.08); }
-        .fu-ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
-
-        /* ── Modals ── */
-        .fu-overlay {
-          position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-          display: flex; align-items: center; justify-content: center; z-index: 500;
-          animation: fadeIn 0.15s ease;
-        }
-        @keyframes fadeIn { from{opacity:0} to{opacity:1} }
-        .fu-modal {
-          background: var(--surface); border: 1px solid var(--border);
-          border-radius: 18px; padding: 28px; width: 100%; max-width: 400px;
-          animation: slideUp 0.2s ease;
-        }
-        @keyframes slideUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
-        .fu-modal-title { font-family: 'Syne', sans-serif; font-size: 1.05rem; font-weight: 700; color: var(--text); margin-bottom: 6px; }
-        .fu-modal-sub { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 20px; }
-        .fu-modal-actions { display: flex; gap: 8px; margin-top: 20px; }
-        .fu-modal-btn {
-          flex: 1; padding: 9px; border-radius: 9px;
-          font-family: 'DM Sans', sans-serif; font-size: 0.83rem; font-weight: 500; cursor: pointer; transition: all 0.15s;
-        }
-        .fu-modal-btn.secondary { background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); }
-        .fu-modal-btn.secondary:hover { color: var(--text); border-color: var(--border-hover); }
-        .fu-modal-btn.primary { background: var(--accent-glow); border: 1px solid rgba(108,142,255,0.35); color: var(--accent); }
-        .fu-modal-btn.primary:hover { background: rgba(108,142,255,0.25); }
-        .fu-modal-btn.danger { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: var(--error); }
-        .fu-modal-btn.danger:hover { background: rgba(248,113,113,0.18); }
-        .fu-share-url-wrap {
-          display: flex; gap: 6px; background: var(--surface2); border: 1px solid var(--border);
-          border-radius: 10px; padding: 10px 12px;
-        }
-        .fu-share-url {
-          flex: 1; font-size: 0.78rem; color: var(--text-dim);
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-          background: none; border: none; outline: none; font-family: 'DM Sans', sans-serif; cursor: default;
-        }
-        .fu-copy-btn {
-          background: var(--accent-glow); border: 1px solid rgba(108,142,255,0.3);
-          color: var(--accent); font-size: 0.75rem; font-weight: 500;
-          padding: 4px 10px; border-radius: 7px; cursor: pointer; flex-shrink: 0;
-          font-family: 'DM Sans', sans-serif; transition: all 0.15s;
-        }
-        .fu-copy-btn.copied { background: rgba(52,211,153,0.15); border-color: rgba(52,211,153,0.35); color: var(--success); }
-        .fu-folder-picker { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
-        .fu-picker-item {
-          display: flex; align-items: center; gap: 10px; padding: 9px 12px;
-          border-radius: 9px; cursor: pointer; border: 1px solid transparent;
-          font-size: 0.83rem; color: var(--text-dim); background: none; text-align: left;
-          font-family: 'DM Sans', sans-serif; width: 100%; transition: all 0.12s;
-        }
-        .fu-picker-item:hover { background: var(--surface2); border-color: var(--border); color: var(--text); }
-        .fu-picker-item.active { background: var(--accent-glow); border-color: rgba(108,142,255,0.25); color: var(--accent); }
-        .fu-move-create {
-          display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px;
-          border: 1px dashed rgba(108,142,255,0.35); border-radius: 10px;
-          padding: 8px; background: rgba(108,142,255,0.06);
-        }
-        .fu-move-create input {
-          min-width: 0; background: var(--surface2); border: 1px solid var(--border);
-          color: var(--text); border-radius: 8px; padding: 8px 10px;
-          font-family: 'DM Sans', sans-serif; font-size: 0.8rem; outline: none;
-        }
-        .fu-move-create button {
-          background: var(--accent-glow); border: 1px solid rgba(108,142,255,0.35);
-          color: var(--accent); border-radius: 8px; padding: 8px 10px;
-          font-family: 'DM Sans', sans-serif; font-size: 0.78rem; font-weight: 600; cursor: pointer;
-        }
-
-        /* ── Toast ── */
-        .fu-toast {
-          position: fixed; bottom: 28px; right: 28px;
-          background: var(--surface2); border: 1px solid var(--border);
-          border-radius: 12px; padding: 12px 18px; font-size: 0.82rem; font-weight: 500;
-          display: flex; align-items: center; gap: 10px;
-          box-shadow: 0 8px 32px rgba(0,0,0,0.4); animation: slideUp 0.25s ease; z-index: 999; max-width: 320px;
-        }
-        .fu-toast.success { border-color: rgba(52,211,153,0.3); color: var(--success); }
-        .fu-toast.warn    { border-color: rgba(251,191,36,0.3);  color: var(--warn); }
-        .fu-toast.error   { border-color: rgba(248,113,113,0.3); color: var(--error); }
-
-        .fu-skeleton {
-          height: 60px;
-          background: linear-gradient(90deg, var(--surface) 25%, var(--surface2) 50%, var(--surface) 75%);
-          background-size: 200% 100%; animation: shimmer 1.4s infinite;
-          border-radius: 12px; margin-bottom: 7px;
-        }
-        @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-        .fu-empty { text-align: center; padding: 40px 0; color: var(--text-muted); font-size: 0.85rem; }
-        .fu-empty-icon { font-size: 2rem; margin-bottom: 10px; opacity: 0.4; }
-      `}</style>
 
       {showSearch && <FileSearch onClose={() => setShowSearch(false)} />}
 
       <div className="fu-root">
 
-        {/* ── Top nav ── */}
+        {/* â”€â”€ Top nav â”€â”€ */}
         <div className="fu-topbar">
           <div className="fu-topbar-brand">Storage</div>
           <div className="fu-topbar-actions">
             <button className="fu-topbar-btn" onClick={() => setShowSearch(true)}>
-              🔍
+              ðŸ”
             </button>
             <button className="fu-topbar-btn accent" onClick={() => router.push("/sidebar")}>
               Browse by type
@@ -1246,7 +925,7 @@ export default function FileUpload() {
           </div>
         </div>
 
-        {/* ── Folder tabs ── */}
+        {/* â”€â”€ Folder tabs â”€â”€ */}
         <div className="fu-tabs-wrap">
           <button
             className={`fu-tab ${currentFolderId === null ? "active" : ""}`}
@@ -1282,7 +961,7 @@ export default function FileUpload() {
                 onKeyDown={(e) => { if (e.key === "Enter") createFolder(); if (e.key === "Escape") setShowNewFolder(false); }}
                 autoFocus
               />
-              <button className="fu-btn-pill" onClick={() => setShowNewFolder(false)}>✕</button>
+              <button className="fu-btn-pill" onClick={() => setShowNewFolder(false)}>âœ•</button>
               <button className="fu-btn-pill accent" onClick={createFolder}>Create</button>
             </div>
           ) : (
@@ -1290,7 +969,7 @@ export default function FileUpload() {
           )}
         </div>
 
-        {/* ── Main content ── */}
+        {/* â”€â”€ Main content â”€â”€ */}
         <div className="fu-shell">
         <div className="fu-content">
 
@@ -1304,7 +983,7 @@ export default function FileUpload() {
             {currentFolder && (
               <div className="fu-header-actions">
                 <button className="fu-action-btn" onClick={() => downloadFolder(currentFolder)}>
-                  ⬇ Download folder
+                  â¬‡ Download folder
                 </button>
                 <button className="fu-action-btn" onClick={() => openFolderShareModal(currentFolder, "read")}>
                   Share read link
@@ -1335,17 +1014,17 @@ export default function FileUpload() {
 
             {status === "idle" && (
               <>
-                <div className="fu-dropzone-icon">☁️</div>
+                <div className="fu-dropzone-icon">â˜ï¸</div>
                 <div className="fu-dropzone-title">
                   Drop your file here{currentFolder ? ` into "${currentFolder.name}"` : ""}
                 </div>
                 <div className="fu-dropzone-sub">
-                  or <span>browse</span> — under 10 MB uploads instantly, larger files use multipart
+                  or <span>browse</span> â€” under 10 MB uploads instantly, larger files use multipart
                 </div>
                 {pendingFiles.length > 0 && (
                   <div className="fu-pending-banner" onClick={(e) => e.stopPropagation()}>
                     <div className="fu-pending-banner-title">
-                      ⏳ {pendingFiles.length} pending upload{pendingFiles.length > 1 ? "s" : ""}
+                      â³ {pendingFiles.length} pending upload{pendingFiles.length > 1 ? "s" : ""}
                     </div>
                     {pendingFiles.map((pf) => (
                       <div key={pf._id} className="fu-pending-row">
@@ -1364,7 +1043,7 @@ export default function FileUpload() {
                             fileInput.click();
                           }}
                         >
-                          {resumingId === pf._id ? "⟳ Resuming..." : "⟳ Resume"}
+                          {resumingId === pf._id ? "âŸ³ Resuming..." : "âŸ³ Resume"}
                         </button>
                         <button
                           className="fu-pending-btn cancel"
@@ -1382,7 +1061,7 @@ export default function FileUpload() {
                             }
                           }}
                         >
-                          ✕
+                          âœ•
                         </button>
                       </div>
                     ))}
@@ -1398,8 +1077,8 @@ export default function FileUpload() {
                 </div>
                 <div className="fu-bar-bg"><div className="fu-bar-fill" style={{ width: `${progress}%` }} /></div>
                 <div style={{ display: "flex", gap: 6 }}>
-                  <button className="fu-cancel-btn" onClick={handlePause}>⏸ Pause</button>
-                  <button className="fu-cancel-btn" onClick={handleCancel}>✕ Cancel</button>
+                  <button className="fu-cancel-btn" onClick={handlePause}>â¸ Pause</button>
+                  <button className="fu-cancel-btn" onClick={handleCancel}>âœ• Cancel</button>
                 </div>
               </div>
             )}
@@ -1408,26 +1087,26 @@ export default function FileUpload() {
             )}
             {status === "error" && (
               <>
-                <div className="fu-status error">✕ {errorMsg || "Upload failed"}</div>
+                <div className="fu-status error">âœ• {errorMsg || "Upload failed"}</div>
                 <div className="fu-dropzone-sub" style={{ marginTop: 4 }}>Click to try again</div>
               </>
             )}
             {status === "duplicate" && duplicateFile && (
               <div className="fu-duplicate" onClick={(e) => e.stopPropagation()}>
-                <div className="fu-duplicate-title">⚠ Duplicate file detected</div>
+                <div className="fu-duplicate-title">âš  Duplicate file detected</div>
                 <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
                   <span>{duplicateFile.filename}</span> already exists in your storage.
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button className="fu-dup-open-btn" onClick={async () => openFile(duplicateFile)}>
-                    Open existing →
+                    Open existing â†’
                   </button>
                   <button
                     className="fu-dup-open-btn"
                     style={{ background: "rgba(108,142,255,0.1)", borderColor: "rgba(108,142,255,0.3)", color: "var(--accent)" }}
                     onClick={() => downloadFile(duplicateFile)}
                   >
-                    ⬇ Download
+                    â¬‡ Download
                   </button>
                 </div>
               </div>
@@ -1449,8 +1128,8 @@ export default function FileUpload() {
                     onClick={() => setCurrentFolderId(folder._id)}
                     onContextMenu={(e) => openCtx(e, folder, "folder")}
                   >
-                    <button className="fu-folder-card-opts" onClick={(e) => { e.stopPropagation(); openCtx(e, folder, "folder"); }}>⋯</button>
-                    <div className="fu-folder-icon">📁</div>
+                    <button className="fu-folder-card-opts" onClick={(e) => { e.stopPropagation(); openCtx(e, folder, "folder"); }}>â‹¯</button>
+                    <div className="fu-folder-icon">ðŸ“</div>
                     <div className="fu-folder-name">{folder.name}</div>
                     <div className="fu-folder-count">{uploadedFiles.filter((f) => f.folderId === folder._id).length} files</div>
                   </div>
@@ -1469,7 +1148,7 @@ export default function FileUpload() {
               <><div className="fu-skeleton" /><div className="fu-skeleton" /><div className="fu-skeleton" /></>
             ) : visibleFiles.length === 0 ? (
               <div className="fu-empty">
-                <div className="fu-empty-icon">📂</div>
+                <div className="fu-empty-icon">ðŸ“‚</div>
                 <div>{currentFolder ? "No files in this folder yet" : "No files uploaded yet"}</div>
               </div>
             ) : (
@@ -1479,10 +1158,10 @@ export default function FileUpload() {
                   <div className="fu-file-info">
                     <div className="fu-file-name">{file.filename}</div>
                     <div className="fu-file-meta">
-                      {formatBytes(file.size)} · {new Date(file.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                      {formatBytes(file.size)} Â· {new Date(file.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                       {file.folderId && folders.find(f => f._id === file.folderId) && (
                         <span style={{ marginLeft: 6, color: "var(--folder-color)", fontSize: "0.68rem" }}>
-                          📁 {folders.find(f => f._id === file.folderId)?.name}
+                          ðŸ“ {folders.find(f => f._id === file.folderId)?.name}
                         </span>
                       )}
                     </div>
@@ -1490,11 +1169,11 @@ export default function FileUpload() {
                   <div className="fu-file-actions">
                     <button className="fu-icon-btn open"
                       onClick={async () => openFile(file)}>
-                      Open ↗
+                      Open â†—
                     </button>
                     <button className="fu-icon-btn share" onClick={() => openShareModal(file)}>Share</button>
                     <button className="fu-icon-btn" onClick={() => openVersions(file)}>Versions</button>
-                    <button className="fu-icon-btn" onClick={() => downloadFile(file)}>⬇</button>
+                    <button className="fu-icon-btn" onClick={() => downloadFile(file)}>â¬‡</button>
 
                     {/* Three-dot menu */}
                     <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
@@ -1503,7 +1182,7 @@ export default function FileUpload() {
                         style={openMenuId === file._id ? { borderColor: "var(--border-hover)", color: "var(--text)" } : {}}
                         onClick={() => setOpenMenuId(openMenuId === file._id ? null : file._id)}
                       >
-                        ⋯
+                        â‹¯
                       </button>
 
                       {openMenuId === file._id && (
@@ -1515,7 +1194,7 @@ export default function FileUpload() {
                         }}>
                           <button className="fu-ctx-item"
                             onClick={async () => { await openFile(file); setOpenMenuId(null); }}>
-                            ↗ Open
+                            â†— Open
                           </button>
                           <button className="fu-ctx-item"
                             onClick={() => { openShareModal(file); setOpenMenuId(null); }}>
@@ -1527,7 +1206,7 @@ export default function FileUpload() {
                           </button>
                           <button className="fu-ctx-item"
                             onClick={() => { downloadFile(file); setOpenMenuId(null); }}>
-                            ⬇ Download
+                            â¬‡ Download
                           </button>
                           <button className="fu-ctx-item"
                             onClick={() => { setMoveTarget(file); setOpenMenuId(null); }}>
@@ -1547,20 +1226,20 @@ export default function FileUpload() {
             )}
           </div>
 
-          {/* ── Pending Uploads ── */}
+          {/* â”€â”€ Pending Uploads â”€â”€ */}
           {!pendingLoading && pendingFiles.length > 0 && (
             <div>
               <div className="fu-section-header">
-                <span className="fu-section-title">⏳ Pending Uploads</span>
+                <span className="fu-section-title">â³ Pending Uploads</span>
                 <span className="fu-section-count">{pendingFiles.length}</span>
               </div>
               {pendingFiles.map((pf) => (
                 <div key={pf._id} className="fu-file-card" style={{ borderColor: "rgba(251,191,36,0.3)" }}>
-                  <div className="fu-file-icon">⏳</div>
+                  <div className="fu-file-icon">â³</div>
                   <div className="fu-file-info">
                     <div className="fu-file-name">{pf.filename}</div>
                     <div className="fu-file-meta">
-                      {formatBytes(pf.size)} · {new Date(pf.createdAt).toLocaleDateString()} · {pf.backend === "telegram" ? "☁️ Telegram" : "☁️ S3"}
+                      {formatBytes(pf.size)} Â· {new Date(pf.createdAt).toLocaleDateString()} Â· {pf.backend === "telegram" ? "â˜ï¸ Telegram" : "â˜ï¸ S3"}
                     </div>
                   </div>
                   <div className="fu-file-actions">
@@ -1582,7 +1261,7 @@ export default function FileUpload() {
                         fileInput.click();
                       }}
                     >
-                      {resumingId === pf._id ? "⟳ Resuming..." : "⟳ Resume"}
+                      {resumingId === pf._id ? "âŸ³ Resuming..." : "âŸ³ Resume"}
                     </button>
                     <button
                       className="fu-icon-btn danger"
@@ -1601,7 +1280,7 @@ export default function FileUpload() {
                         }
                       }}
                     >
-                      ✕
+                      âœ•
                     </button>
                   </div>
                 </div>
@@ -1626,14 +1305,14 @@ export default function FileUpload() {
         </div>
       </div>
 
-      {/* ── Context menu ── */}
+      {/* â”€â”€ Context menu â”€â”€ */}
       {ctxMenu && (
         <div className="fu-ctx" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
           {ctxMenu.itemType === "file" ? (
             <>
-              <button className="fu-ctx-item" onClick={async () => { await openFile(ctxMenu.item as FileType); setCtxMenu(null); }}>↗ Open</button>
+              <button className="fu-ctx-item" onClick={async () => { await openFile(ctxMenu.item as FileType); setCtxMenu(null); }}>â†— Open</button>
               <button className="fu-ctx-item" onClick={() => { openShareModal(ctxMenu.item as FileType); setCtxMenu(null); }}>Share</button>
-              <button className="fu-ctx-item" onClick={() => { downloadFile(ctxMenu.item as FileType); setCtxMenu(null); }}>⬇ Download</button>
+              <button className="fu-ctx-item" onClick={() => { downloadFile(ctxMenu.item as FileType); setCtxMenu(null); }}>â¬‡ Download</button>
               <button className="fu-ctx-item" onClick={() => { setMoveTarget(ctxMenu.item as FileType); setCtxMenu(null); }}>Move to folder</button>
               <div className="fu-ctx-sep" />
               <button className="fu-ctx-item danger" onClick={() => { setDeleteTarget({ type: "file", item: ctxMenu.item as FileType }); setCtxMenu(null); }}>Delete</button>
@@ -1644,7 +1323,7 @@ export default function FileUpload() {
               <button className="fu-ctx-item" onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "read"); setCtxMenu(null); }}>Share read link</button>
               <button className="fu-ctx-item" onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "add"); setCtxMenu(null); }}>Share write link</button>
               <button className="fu-ctx-item" onClick={() => { setMoveFolderTarget(ctxMenu.item as FolderType); setCtxMenu(null); }}>Move folder</button>
-              <button className="fu-ctx-item" onClick={() => { downloadFolder(ctxMenu.item as FolderType); setCtxMenu(null); }}>⬇ Download as ZIP</button>
+              <button className="fu-ctx-item" onClick={() => { downloadFolder(ctxMenu.item as FolderType); setCtxMenu(null); }}>â¬‡ Download as ZIP</button>
               <div className="fu-ctx-sep" />
               <button className="fu-ctx-item danger" onClick={() => { setDeleteTarget({ type: "folder", item: ctxMenu.item as FolderType }); setCtxMenu(null); }}>Delete folder</button>
             </>
@@ -1652,7 +1331,7 @@ export default function FileUpload() {
         </div>
       )}
 
-      {/* ── Share modal ── */}
+      {/* â”€â”€ Share modal â”€â”€ */}
       {shareTarget && (
         <div className="fu-overlay" onClick={() => setShareTarget(null)}>
           <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
@@ -1686,11 +1365,11 @@ export default function FileUpload() {
               <div className="fu-share-url-wrap">
                 <input className="fu-share-url" readOnly value={shareUrl} />
                 <button className={`fu-copy-btn ${shareCopied ? "copied" : ""}`} onClick={copyShareUrl}>
-                  {shareCopied ? "✓ Copied" : "Copy"}
+                  {shareCopied ? "âœ“ Copied" : "Copy"}
                 </button>
               </div>
             ) : (
-              <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Generating link…</div>
+              <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Generating linkâ€¦</div>
             )}
             <div className="fu-modal-actions">
               <button className="fu-modal-btn secondary" onClick={() => setShareTarget(null)}>Close</button>
@@ -1699,7 +1378,7 @@ export default function FileUpload() {
         </div>
       )}
 
-      {/* ── Move modal ── */}
+      {/* â”€â”€ Move modal â”€â”€ */}
       {moveTarget && (
         <div className="fu-overlay" onClick={() => setMoveTarget(null)}>
           <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
@@ -1771,7 +1450,7 @@ export default function FileUpload() {
         </div>
       )}
 
-      {/* ── Version history modal ── */}
+      {/* â”€â”€ Version history modal â”€â”€ */}
       {versionTarget && (
         <div className="fu-overlay" onClick={() => setVersionTarget(null)}>
           <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
@@ -1779,7 +1458,7 @@ export default function FileUpload() {
             <div className="fu-modal-sub">Every saved version of <span>{versionTarget.filename}</span> is visible here.</div>
             <div className="fu-folder-picker">
               {versionsLoading ? (
-                <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Loading versions…</div>
+                <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Loading versionsâ€¦</div>
               ) : versions.length === 0 ? (
                 <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>No versions recorded yet.</div>
               ) : (
@@ -1800,11 +1479,11 @@ export default function FileUpload() {
         </div>
       )}
 
-      {/* ── Delete confirm modal ── */}
+      {/* â”€â”€ Delete confirm modal â”€â”€ */}
       {deleteTarget && (
         <div className="fu-overlay" onClick={() => setDeleteTarget(null)}>
           <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="fu-modal-title">⚠ Confirm delete</div>
+            <div className="fu-modal-title">âš  Confirm delete</div>
             <div className="fu-modal-sub">
               {deleteTarget.type === "file"
                 ? `Delete "${(deleteTarget.item as FileType).filename}"? This cannot be undone.`
@@ -1818,10 +1497,10 @@ export default function FileUpload() {
         </div>
       )}
 
-      {/* ── Toast ── */}
+      {/* â”€â”€ Toast â”€â”€ */}
       {toast && (
         <div className={`fu-toast ${toast.type}`}>
-          {toast.type === "success" ? "✓" : toast.type === "warn" ? "⚠" : "✕"} {toast.msg}
+          {toast.type === "success" ? "âœ“" : toast.type === "warn" ? "âš " : "âœ•"} {toast.msg}
         </div>
       )}
     </>
