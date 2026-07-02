@@ -782,7 +782,7 @@ export default function FileUpload() {
     if (intervalRef.current) clearInterval(intervalRef.current);
 
     const meta = currentUploadRef.current;
-    if (meta?.backend === "telegram") {
+    if (meta) {
       try {
         await fetch("/api/files/telegram/pause", {
           method: "POST",
@@ -842,7 +842,7 @@ export default function FileUpload() {
       if (pendingFile.hash && hash !== pendingFile.hash) {
         throw new Error("Selected file does not match the original. Hash mismatch.");
       }
-      await telegramUpload(file, hash, (pct) => {
+      await uploadSmart(file, hash, (pct) => {
         if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
         setProgress(pct);
       });
@@ -1428,9 +1428,7 @@ export default function FileUpload() {
                 </div>
                 <div className="fu-bar-bg"><div className="fu-bar-fill" style={{ width: `${progress}%` }} /></div>
                 <div style={{ display: "flex", gap: 6 }}>
-                  {storageType === "telegram" && (
-                    <button className="fu-cancel-btn" onClick={handlePause}>⏸ Pause</button>
-                  )}
+                  <button className="fu-cancel-btn" onClick={handlePause}>⏸ Pause</button>
                   <button className="fu-cancel-btn" onClick={handleCancel}>✕ Cancel</button>
                 </div>
               </div>

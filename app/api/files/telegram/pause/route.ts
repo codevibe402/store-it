@@ -24,9 +24,6 @@ export async function POST(req: NextRequest) {
   if (file.owner_email !== session.user.email) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  if (file.backend !== "telegram") {
-    return NextResponse.json({ error: "Only Telegram uploads can be paused" }, { status: 400 });
-  }
   if (!["pending", "uploading"].includes(file.status)) {
     return NextResponse.json({ error: `Cannot pause file in status "${file.status}"` }, { status: 409 });
   }
