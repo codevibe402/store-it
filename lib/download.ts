@@ -54,6 +54,7 @@ export async function createTelegramDownloadStream(
   totalSize: number,
   mimetype: string,
   filename: string,
+  disposition: "inline" | "attachment" = "attachment",
 ): Promise<Response> {
   const chunks = await TelegramChunk.find({ versionId }).sort({ chunkIndex: 1 }).lean();
   const totalChunks = chunks.length;
@@ -107,7 +108,7 @@ export async function createTelegramDownloadStream(
     status: 200,
     headers: {
       "Content-Type": mimetype || "application/octet-stream",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": `${disposition}; filename="${filename}"`,
       "Content-Length": totalSize.toString(),
     },
   });

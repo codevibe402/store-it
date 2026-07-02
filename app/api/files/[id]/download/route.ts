@@ -42,6 +42,7 @@ export async function GET(
     }
 
     const versionId = req.nextUrl.searchParams.get("versionId");
+    const preview = req.nextUrl.searchParams.get("preview") === "1";
     let version;
 
     if (versionId) {
@@ -54,16 +55,19 @@ export async function GET(
       return createTelegramDownloadStream(
         version._id.toString(),
         version.size,
-        version.mimetype,
+        preview ? file.mimetype : version.mimetype,
         file.filename,
+        preview ? "inline" : "attachment",
       );
     }
 
     const storageUrl = version?.storageUrl ?? file.storageUrl;
+    const disposition = preview ? "inline" : "attachment";
     const downloadUrl = await createS3DownloadUrl(
       storageUrl,
       file.filename,
       file.mimetype,
+      disposition,
     );
 
     const response = NextResponse.redirect(downloadUrl, { status: 302 });

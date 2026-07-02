@@ -192,6 +192,7 @@ export default function FileUpload() {
   const currentFileIdRef = useRef<string | null>(null);
   const currentUploadRef = useRef<{ backend: "s3" | "telegram"; fileId: string; uploadId?: string; key?: string } | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
+  const currentFileNameRef = useRef<string>("");
 
   useEffect(() => {
     if (!toast) return;
@@ -547,12 +548,7 @@ export default function FileUpload() {
 
   // -- File actions --
   const openFile = async (file: FileType) => {
-    if (file.backend === "telegram") {
-      window.open(`/api/files/telegram/${file._id}/download`, "_blank");
-    } else {
-      const u = await getFileUrl(file.storageUrl);
-      window.open(u, "_blank");
-    }
+    window.open(`/api/files/${file._id}/download?preview=1`, "_blank");
   };
 
   const downloadFile = async (file: FileType) => {
@@ -821,6 +817,7 @@ export default function FileUpload() {
 
   const handleFile = async (file: File) => {
     setStatus("uploading"); setProgress(0);
+    currentFileNameRef.current = file.name;
     setErrorMsg(""); setDuplicateFile(null);
     cancelRef.current = false;
     pauseRef.current = false;
@@ -857,6 +854,7 @@ export default function FileUpload() {
     setResumingId(pendingFile._id);
     setStatus("uploading");
     setProgress(0);
+    currentFileNameRef.current = file.name;
     cancelRef.current = false;
     pauseRef.current = false;
     try {
@@ -977,7 +975,12 @@ export default function FileUpload() {
         <div className="fu-content">
 
           {/* Header */}
-          <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {currentFolder && (
+              <button className="fu-action-btn" onClick={() => setCurrentFolderId(currentFolder.parent_id ?? null)}>
+                Back
+              </button>
+            )}
             <div style={{ color: "var(--text-muted)", fontSize: "0.85rem", fontWeight: 300 }}>
               {currentFolder
                 ? `${visibleFiles.length} file${visibleFiles.length !== 1 ? "s" : ""} in "${currentFolder.name}"`
@@ -1024,13 +1027,26 @@ export default function FileUpload() {
           </div>
 
           {/* Active Uploads */}
-          {pendingFiles.length > 0 && (
+          {(status === "uploading" || pendingFiles.length > 0) && (
             <div>
               <div className="fu-section-header">
                 <span className="fu-section-title">Active Uploads</span>
-                <span className="fu-section-count">{pendingFiles.length}</span>
+                <span className="fu-section-count">{status === "uploading" ? 1 + pendingFiles.length : pendingFiles.length}</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {status === "uploading" && (
+                  <div className="fu-pending-row" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span className="fu-pending-name">{currentFileNameRef.current || "Uploading..."}</span>
+                      <span className="fu-pending-meta">{progress}%</span>
+                    </div>
+                    <div className="fu-bar-bg"><div className="fu-bar-fill" style={{ width: `${progress}%` }} /></div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                      <button className="fu-cancel-btn" onClick={handlePause}>Pause</button>
+                      <button className="fu-cancel-btn" onClick={handleCancel}>Cancel</button>
+                    </div>
+                  </div>
+                )}
                 {pendingFiles.map((pf) => (
                   <div key={pf._id} className="fu-pending-row" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
                     <span className="fu-pending-name">{pf.filename}</span>
@@ -1102,7 +1118,7 @@ export default function FileUpload() {
           {/* File list */}
           <div>
             <div className="fu-section-header">
-              <span className="fu-section-title">{currentFolder ? "Files" : "All Files"}</span>
+              <span className="fu-section-title">Files</span>
               {!filesLoading && <span className="fu-section-count">{visibleFiles.length}</span>}
             </div>
             {filesLoading ? (

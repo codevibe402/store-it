@@ -1,0 +1,10 @@
+[33m2dde7e7[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mstaging[m[33m, [m[1;31morigin/staging[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m input validation
+[33m0e3de03[m Add client-side input sanitization (security.ts), return early with generic auth errors
+[33me5a1b9d[m Remove BOM, strip emoji/upload progress from dropzone
+[33m5527f8a[m Fix corrupted Unicode characters, restructure dropzone, add Active Uploads section
+[33m6b28cbc[m Add /all-files page with backend badges and button in dashboard topbar
+[33m51f0f79[m Extract inline styles from fileupload.tsx and filesearch.tsx into globals.css
+[33mf887e2d[m feat: extract search into overlay component with icon trigger
+[33m40f8c35[m perf: limit search fields, fix cache header to private
+[33mecf0131[m perf: reduce dashboard payload, add indexes, combine endpoints, private cache headers
+[33mf4891c7[m add pause button for S3 uploads too
