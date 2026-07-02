@@ -53,15 +53,36 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "Storage limit exceeded" }, { status: 413 });
   }
 
-  const key = `uploads/${user._id}/${Date.now()}-${filename}`;
-  const searchText = await extractSearchText(buffer, filename, mimeType);
+  let resolvedFilename = filename;
+  let conflict = true;
+  for (let attempt = 1; conflict; attempt++) {
+    const existing = await File.findOne({
+      filename: resolvedFilename,
+      folderId: share.folderId,
+      owner_id: user._id,
+      status: "uploaded",
+    }).lean();
+    if (!existing) {
+      conflict = false;
+    } else {
+      const ext = filename.lastIndexOf(".");
+      if (ext > 0) {
+        resolvedFilename = `${filename.slice(0, ext)} (shared upload ${attempt})${filename.slice(ext)}`;
+      } else {
+        resolvedFilename = `${filename} (shared upload ${attempt})`;
+      }
+    }
+  }
+
+  const key = `uploads/${user._id}/${Date.now()}-${resolvedFilename}`;
+  const searchText = await extractSearchText(buffer, resolvedFilename, mimeType);
 
   await s3.send(
     new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: buffer, ContentType: mimeType, ContentLength: size })
   );
 
   const file = await File.create({
-    filename, hash, owner_email: user.email, owner_id: user._id,
+    filename: resolvedFilename, hash, owner_email: user.email, owner_id: user._id,
     mimetype: mimeType, size, searchText,
     textIndexedAt: searchText ? new Date() : null,
     storageUrl: key, backend: "s3",
