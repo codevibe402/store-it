@@ -159,9 +159,11 @@ export default function FileUpload() {
   const [storageType, setStorageType] = useState<"s3" | "telegram">("telegram");
   const inputRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef(false);
+  const pauseRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const currentFileIdRef = useRef<string | null>(null);
+  const currentUploadRef = useRef<{ backend: "s3" | "telegram"; fileId: string; uploadId?: string; key?: string } | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -280,6 +282,12 @@ export default function FileUpload() {
     if (initRes.status === 409) { const d = await initRes.json(); throw { isDuplicate: true, existingFile: d.existingFile }; }
     if (!initRes.ok) throw await parseError(initRes, "Failed to initialise multipart upload");
     const { uploadId, key, totalParts, fileId } = await initRes.json();
+    currentFileIdRef.current = fileId;
+    currentUploadRef.current = { backend: "s3", fileId, uploadId, key };
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     const partNumbers = Array.from({ length: totalParts }, (_, i) => i + 1);
     const presignRes = await fetch("/api/files/upload/multipart/presign", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -289,25 +297,30 @@ export default function FileUpload() {
     if (!presignRes.ok) throw new Error("Failed to get presigned URLs");
     const { urls } = await presignRes.json();
     let uploadedBytes = 0;
-    const parts = await Promise.all(urls.map(async (url: string, i: number) => {
+    try {
+      const parts = await Promise.all(urls.map(async (url: string, i: number) => {
+        if (cancelRef.current) throw { isCancelled: true };
+        const start = i * CHUNK_SIZE;
+        const chunk = file.slice(start, start + CHUNK_SIZE);
+        const res = await fetch(url, { method: "PUT", body: chunk, signal: controller.signal });
+        if (!res.ok) throw new Error(`Failed to upload part ${i + 1}`);
+        const ETag = res.headers.get("ETag") ?? "";
+        uploadedBytes += chunk.size;
+        onProgress(Math.round((uploadedBytes / file.size) * 100));
+        return { PartNumber: i + 1, ETag };
+      }));
       if (cancelRef.current) throw { isCancelled: true };
-      const start = i * CHUNK_SIZE;
-      const chunk = file.slice(start, start + CHUNK_SIZE);
-      const res = await fetch(url, { method: "PUT", body: chunk });
-      if (!res.ok) throw new Error(`Failed to upload part ${i + 1}`);
-      const ETag = res.headers.get("ETag") ?? "";
-      uploadedBytes += chunk.size;
-      onProgress(Math.round((uploadedBytes / file.size) * 100));
-      return { PartNumber: i + 1, ETag };
-    }));
-    if (cancelRef.current) throw { isCancelled: true };
-    const completeRes = await fetch("/api/files/upload/multipart/complete", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, uploadId, parts, fileId }),
-    });
-    if (!completeRes.ok) throw new Error("Failed to complete multipart upload");
-    queryClient.invalidateQueries({ queryKey: ["files"] });
-    return completeRes.json();
+      const completeRes = await fetch("/api/files/upload/multipart/complete", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, uploadId, parts, fileId }),
+      });
+      if (!completeRes.ok) throw new Error("Failed to complete multipart upload");
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+      return completeRes.json();
+    } finally {
+      abortRef.current = null;
+      currentUploadRef.current = null;
+    }
   }
 
   async function getChunkHash(blob: Blob): Promise<string> {
@@ -397,6 +410,7 @@ export default function FileUpload() {
     }
     const { fileId } = await initRes.json();
     currentFileIdRef.current = fileId;
+    currentUploadRef.current = { backend: "telegram", fileId };
 
     const resumeRes = await fetch(`/api/files/telegram/${fileId}/resume`);
     const resumeData = resumeRes.ok ? await resumeRes.json() : null;
@@ -407,11 +421,12 @@ export default function FileUpload() {
     const controller = new AbortController();
     abortRef.current = controller;
     cancelRef.current = false;
+    pauseRef.current = false;
 
     const lock = { current: 0 };
 
     async function worker() {
-      while (!cancelRef.current && !controller.signal.aborted) {
+      while (!cancelRef.current && !pauseRef.current && !controller.signal.aborted) {
         const index = lock.current++;
         if (index >= totalChunks) break;
         if (alreadyUploaded.has(index)) continue;
@@ -443,7 +458,7 @@ export default function FileUpload() {
             uploadedBytes += chunkBlob.size;
             onProgress(Math.round((uploadedBytes / file.size) * 100));
           } catch (err: any) {
-            if (cancelRef.current || controller.signal.aborted) throw { isCancelled: true };
+            if (cancelRef.current || pauseRef.current || controller.signal.aborted) throw { isCancelled: true };
             if (err.canFallbackToS3) throw err;
             if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
             else throw new Error(`Chunk ${index} failed after 3 attempts`);
@@ -462,6 +477,7 @@ export default function FileUpload() {
 
       if (err?.canFallbackToS3) {
         currentFileIdRef.current = null;
+        currentUploadRef.current = null;
         try {
           const fallbackRes = await fetch(`/api/files/${fileId}/fallback-to-s3`, {
             method: "POST",
@@ -485,12 +501,14 @@ export default function FileUpload() {
       }
 
       currentFileIdRef.current = null;
+      currentUploadRef.current = null;
       throw err;
     }
     abortRef.current = null;
     currentFileIdRef.current = null;
+    currentUploadRef.current = null;
 
-    if (cancelRef.current) throw { isCancelled: true };
+    if (cancelRef.current || pauseRef.current) throw { isCancelled: true };
 
     const completeRes = await fetch("/api/files/telegram/complete", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -732,15 +750,24 @@ export default function FileUpload() {
     abortRef.current = null;
     if (intervalRef.current) clearInterval(intervalRef.current);
 
-    const fileId = currentFileIdRef.current;
-    if (fileId) {
+    const meta = currentUploadRef.current;
+    if (meta) {
       currentFileIdRef.current = null;
+      currentUploadRef.current = null;
       try {
-        await fetch("/api/files/telegram/cancel", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileId }),
-        });
+        if (meta.backend === "telegram") {
+          await fetch("/api/files/telegram/cancel", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fileId: meta.fileId }),
+          });
+        } else {
+          await fetch("/api/files/upload/multipart/cancel", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fileId: meta.fileId, uploadId: meta.uploadId, key: meta.key }),
+          });
+        }
       } catch {}
       queryClient.invalidateQueries({ queryKey: ["pending-files"] });
     }
@@ -749,10 +776,32 @@ export default function FileUpload() {
     setToast({ msg: "Upload cancelled.", type: "warn" });
   };
 
+  const handlePause = async () => {
+    pauseRef.current = true;
+    abortRef.current?.abort();
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    const meta = currentUploadRef.current;
+    if (meta?.backend === "telegram") {
+      try {
+        await fetch("/api/files/telegram/pause", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileId: meta.fileId }),
+        });
+      } catch {}
+      queryClient.invalidateQueries({ queryKey: ["pending-files"] });
+    }
+
+    setStatus("idle"); setProgress(0);
+    setToast({ msg: "Upload paused. You can resume later.", type: "warn" });
+  };
+
   const handleFile = async (file: File) => {
     setStatus("uploading"); setProgress(0);
     setErrorMsg(""); setDuplicateFile(null);
     cancelRef.current = false;
+    pauseRef.current = false;
     if (file.size < SMALL_FILE_LIMIT) {
       intervalRef.current = setInterval(() => setProgress((p) => (p < 85 ? p + 8 : p)), 150);
     }
@@ -787,6 +836,7 @@ export default function FileUpload() {
     setStatus("uploading");
     setProgress(0);
     cancelRef.current = false;
+    pauseRef.current = false;
     try {
       const hash = await getFileHash(file);
       if (pendingFile.hash && hash !== pendingFile.hash) {
@@ -1377,7 +1427,12 @@ export default function FileUpload() {
                   <span className="fu-progress-pct">{progress}%</span>
                 </div>
                 <div className="fu-bar-bg"><div className="fu-bar-fill" style={{ width: `${progress}%` }} /></div>
-                <button className="fu-cancel-btn" onClick={handleCancel}>✕ Cancel</button>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {storageType === "telegram" && (
+                    <button className="fu-cancel-btn" onClick={handlePause}>⏸ Pause</button>
+                  )}
+                  <button className="fu-cancel-btn" onClick={handleCancel}>✕ Cancel</button>
+                </div>
               </div>
             )}
             {status === "success" && (
