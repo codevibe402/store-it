@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, DragEvent, ChangeEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {useReducer} from "react"
+import FileSearch from "./filesearch";
 // ── Constants ────────────────────────────────────────────────────────────────
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 const CHUNK_SIZE = 10 * 1024 * 1024;
@@ -56,7 +57,6 @@ duplicateFile: null
 
 type DeleteTarget = { type: "file"; item: FileType } | { type: "folder"; item: FolderType };
 type ToastMsg = { msg: string; type: "error" | "warn" | "success" };
-type SearchResult = FileType & { matchedContent?: boolean; snippet?: string };
 type VersionInfo = {
   id: string;
   version: number;
@@ -149,13 +149,12 @@ export default function FileUpload() {
   const [shareCopied, setShareCopied] = useState(false);
   const [sharePermission, setSharePermission] = useState<"read" | "add">("read");
   const [shareExpiresInDays, setShareExpiresInDays] = useState(7);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [versionTarget, setVersionTarget] = useState<FileType | null>(null);
   const [versions, setVersions] = useState<VersionInfo[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
+  const [showSearch, setShowSearch] = useState(false);
   const [storageType, setStorageType] = useState<"s3" | "telegram">("telegram");
   const inputRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef(false);
@@ -184,31 +183,6 @@ export default function FileUpload() {
     return () => window.removeEventListener("click", close);
   }, []);
 
-  useEffect(() => {
-    if (!isAuthenticated || searchQuery.trim().length < 2) {
-      setSearchResults([]);
-      return;
-    }
-
-    const controller = new AbortController();
-    const timer = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery.trim())}`, {
-          signal: controller.signal,
-        });
-        if (!res.ok) throw new Error("Search failed");
-        const data = await res.json();
-        setSearchResults(data.results ?? []);
-      } catch (error) {
-        if ((error as Error).name !== "AbortError") setSearchResults([]);
-      }
-    }, 250);
-
-    return () => {
-      controller.abort();
-      clearTimeout(timer);
-    };
-  }, [isAuthenticated, searchQuery]);
   // ── Queries ───────────────────────────────────────────────────────────────────
   const { data: dashboard, isLoading: dashboardLoading } = useQuery<{
     files: FileType[];
@@ -1255,12 +1229,17 @@ export default function FileUpload() {
         .fu-empty-icon { font-size: 2rem; margin-bottom: 10px; opacity: 0.4; }
       `}</style>
 
+      {showSearch && <FileSearch onClose={() => setShowSearch(false)} />}
+
       <div className="fu-root">
 
         {/* ── Top nav ── */}
         <div className="fu-topbar">
           <div className="fu-topbar-brand">Storage</div>
           <div className="fu-topbar-actions">
+            <button className="fu-topbar-btn" onClick={() => setShowSearch(true)}>
+              🔍
+            </button>
             <button className="fu-topbar-btn accent" onClick={() => router.push("/sidebar")}>
               Browse by type
             </button>
@@ -1631,37 +1610,6 @@ export default function FileUpload() {
           )}
         </div>
         <aside className="fu-insights">
-          <div>
-            <div className="fu-insight-title">Full-content search</div>
-            <input
-              className="fu-search-input"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search PDFs, code, text..."
-            />
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {searchQuery.trim().length < 2 ? (
-              <div className="fu-search-snippet">Type at least 2 characters to search names and indexed file contents.</div>
-            ) : searchResults.length === 0 ? (
-              <div className="fu-search-snippet">No matches yet.</div>
-            ) : (
-              searchResults.map((result) => (
-                <div className="fu-search-result" key={result._id}>
-                  <div className="fu-search-name">{getFileIcon(result.mimetype)} {result.filename}</div>
-                  <div className="fu-search-snippet">
-                    {result.matchedContent ? result.snippet || "Matched inside file content." : "Matched by file name or type."}
-                  </div>
-                  <button
-                    className="fu-icon-btn open"
-                    onClick={async () => openFile(result)}
-                  >
-                    Open
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
           <div className="fu-trust-card">
             <div className="fu-trust-label">Duplicate protection</div>
             <div className="fu-trust-value">{uploadedFiles.length} files watched</div>
