@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/[...nextauth]";
 import connectDB from "@/lib/mongoose";
 import File from "@/models/File";
+import FileVersion from "@/models/FileVersion";
 import TelegramChunk from "@/models/TelegramChunk";
 import User from "@/models/User";
 
@@ -26,6 +27,9 @@ export async function POST(req: NextRequest) {
   if (file.owner_email !== session.user.email) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  if (file.backend !== "telegram") {
+    return NextResponse.json({ error: "File is not stored in Telegram" }, { status: 409 });
+  }
 
   const chunkCount = await TelegramChunk.countDocuments({ fileId });
   if (chunkCount !== file.totalChunks) {
@@ -38,6 +42,26 @@ export async function POST(req: NextRequest) {
   if (file.status !== "uploaded") {
     file.status = "uploaded";
     await file.save();
+
+    const version = await FileVersion.create({
+      file_id: file._id,
+      version: 1,
+      backend: "telegram",
+      storageUrl: file.storageUrl,
+      hash: file.hash,
+      size: file.size,
+      mimetype: file.mimetype,
+      createdBy: file.owner_id,
+    });
+
+    file.currentVersionId = version._id;
+    await file.save();
+
+    await TelegramChunk.updateMany(
+      { fileId: file._id },
+      { $set: { versionId: version._id } },
+    );
+
     await User.findByIdAndUpdate(file.owner_id, { $inc: { storageused: file.size } });
   }
 

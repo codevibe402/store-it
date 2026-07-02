@@ -9,7 +9,7 @@ import { getFile, getFileDownloadUrl } from "@/lib/telegram";
 const PREFETCH = 4;
 
 async function computeHash(data: Uint8Array): Promise<string> {
-  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", data)))
+  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength))))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
@@ -29,6 +29,7 @@ export async function GET(
   const file = await File.findById(fileId);
   if (!file) return new Response("File not found", { status: 404 });
   if (file.owner_email !== session.user.email) return new Response("Forbidden", { status: 403 });
+  if (file.backend !== "telegram") return new Response("File is not stored in Telegram", { status: 409 });
   if (file.status !== "uploaded") return new Response("File not fully uploaded yet", { status: 400 });
 
   const chunks = await TelegramChunk.find({ fileId }).sort({ chunkIndex: 1 }).lean();

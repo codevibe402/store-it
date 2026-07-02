@@ -25,6 +25,16 @@ export async function GET(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  if (file.backend !== "telegram") {
+    return NextResponse.json({
+      fileId,
+      backend: file.backend,
+      status: file.status,
+      canResumeTelegram: false,
+      canFallbackToS3: file.status === "s3_pending",
+    });
+  }
+
   const chunks = await TelegramChunk.find({ fileId }).sort({ chunkIndex: 1 }).lean();
   const uploadedIndexes = chunks.map((c) => c.chunkIndex);
   const uploadedBytes = chunks.reduce((sum, c) => sum + c.size, 0);
@@ -38,5 +48,7 @@ export async function GET(
     uploadedIndexes,
     uploadedBytes,
     totalBytes: file.size,
+    canResumeTelegram: ["pending", "uploading", "paused"].includes(file.status),
+    canFallbackToS3: file.status === "paused",
   });
 }

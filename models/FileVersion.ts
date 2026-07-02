@@ -1,14 +1,18 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 
-// 1. Interface
 export interface IFileVersion extends Document {
   file_id: mongoose.Types.ObjectId;
   version: number;
-  storage_url: string;
+  backend: 's3' | 'telegram';
+  storageUrl: string;
+  hash: string;
+  size: number;
+  mimetype: string;
+  status: 'uploaded' | 'failed' | 'deleted';
+  createdBy: mongoose.Types.ObjectId;
   uploadedAt?: Date;
 }
 
-// 2. Schema
 const FileVersionSchema: Schema<IFileVersion> = new Schema(
   {
     file_id: {
@@ -21,9 +25,27 @@ const FileVersionSchema: Schema<IFileVersion> = new Schema(
       required: [true, 'Version number is required'],
       min: 1,
     },
-    storage_url: {
+    backend: {
+      type: String,
+      enum: ['s3', 'telegram'],
+      required: true,
+    },
+    storageUrl: {
       type: String,
       required: [true, 'Storage URL is required'],
+    },
+    hash: { type: String, required: true },
+    size: { type: Number, required: true },
+    mimetype: { type: String, default: 'application/octet-stream' },
+    status: {
+      type: String,
+      enum: ['uploaded', 'failed', 'deleted'],
+      default: 'uploaded',
+    },
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
     },
     uploadedAt: {
       type: Date,
@@ -33,16 +55,12 @@ const FileVersionSchema: Schema<IFileVersion> = new Schema(
   { timestamps: false }
 );
 
-// 3. Indexes
 FileVersionSchema.index({ file_id: 1, version: -1 });
-
-// Unique version per file
 FileVersionSchema.index(
   { file_id: 1, version: 1 },
   { unique: true }
 );
 
-// 4. Model (Next.js safe)
 const FileVersion: Model<IFileVersion> =
   mongoose.models.FileVersion ||
   mongoose.model<IFileVersion>('FileVersion', FileVersionSchema);

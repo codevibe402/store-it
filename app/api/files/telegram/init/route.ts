@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Storage limit exceeded" }, { status: 413 });
   }
 
-  const existing = await File.findOne({ owner_id: user._id, hash });
+  const existing = await File.findOne({ owner_id: user._id, hash, backend: "telegram" });
   if (existing) {
     if (existing.status === "uploaded") {
       return NextResponse.json({ error: "Duplicate file", existingFile: existing }, { status: 409 });

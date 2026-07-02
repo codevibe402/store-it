@@ -1,50 +1,39 @@
 import mongoose, { Schema, Document } from "mongoose";
 
-interface IShareFile {
-  fileId: string;
-  filename: string;
-  mimetype: string;
-  size: number;
-  url: string;
-  downloadUrl: string;
-}
-
 export interface IFolderShare extends Document {
   token: string;
-  folderId: string;       // ← was missing; route.ts stores & queries this
+  tokenHash: string;
+  folderId: string;
   folderName: string;
   owner_id: string;
   permission: "read" | "add";
-  files: IShareFile[];
   expiresAt: Date;
+  revokedAt?: Date;
+  maxDownloads?: number;
+  downloadCount: number;
+  allowVersionHistory: boolean;
   createdAt: Date;
 }
 
 const FolderShareSchema = new Schema<IFolderShare>(
   {
     token:      { type: String, required: true, unique: true },
-    folderId:   { type: String, required: true, index: true }, // ← added
+    tokenHash:  { type: String, required: true, unique: true },
+    folderId:   { type: String, required: true, index: true },
     folderName: { type: String, required: true },
     owner_id:   { type: String, required: true, index: true },
     permission: { type: String, enum: ["read", "add"], default: "read" },
-    files: [
-      {
-        fileId:      String,
-        filename:    String,
-        mimetype:    String,
-        size:        Number,
-        url:         String,
-        downloadUrl: String,
-      },
-    ],
-    expiresAt: { type: Date, required: true },
+    expiresAt:  { type: Date, required: true },
+    revokedAt:  { type: Date, default: null },
+    maxDownloads: { type: Number, default: null },
+    downloadCount: { type: Number, default: 0 },
+    allowVersionHistory: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
-// TTL index — MongoDB auto-deletes documents after expiresAt.
-// Defined once here on the schema, not on every POST request.
 FolderShareSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+FolderShareSchema.index({ tokenHash: 1 });
 
 export default mongoose.models.FolderShare ||
   mongoose.model<IFolderShare>("FolderShare", FolderShareSchema);

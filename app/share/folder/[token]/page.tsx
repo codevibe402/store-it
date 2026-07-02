@@ -1,45 +1,51 @@
-// app/share/folder/[token]/page.tsx
-// Public route — no authentication required.
 import { notFound } from "next/navigation";
-import connectDB from "@/lib/mongoose";
-import FolderShare from "@/models/Foldershare";
 import FolderShareActions from "./FolderShareActions";
 
 type ShareFile = {
-  fileId:      string;
-  filename:    string;
-  mimetype:    string;
-  size:        number;
-  url:         string;
+  fileId: string;
+  filename: string;
+  mimetype: string;
+  size: number;
+  backend: string;
   downloadUrl: string;
 };
 
-type ShareDoc = {
-  token:      string;
+type ShareData = {
   folderName: string;
-  owner_id:   string;
   permission: "read" | "add";
-  files:      ShareFile[];
-  expiresAt:  Date;
-  createdAt:  Date;
+  expiresAt: string;
+  files: ShareFile[];
 };
 
 function formatBytes(bytes: number): string {
-  if (bytes < 1024)                  return `${bytes} B`;
-  if (bytes < 1024 * 1024)          return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024)   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function getFileIcon(mimetype: string): string {
-  if (mimetype.startsWith("image/"))                              return "🖼";
-  if (mimetype.startsWith("video/"))                             return "🎬";
-  if (mimetype.startsWith("audio/"))                             return "🎵";
-  if (mimetype.includes("pdf"))                                  return "📄";
+  if (mimetype.startsWith("image/")) return "🖼";
+  if (mimetype.startsWith("video/")) return "🎬";
+  if (mimetype.startsWith("audio/")) return "🎵";
+  if (mimetype.includes("pdf")) return "📄";
   if (mimetype.includes("zip") || mimetype.includes("compressed")) return "🗜";
   if (mimetype.includes("word") || mimetype.includes("document")) return "📝";
-  if (mimetype.includes("sheet") || mimetype.includes("excel"))  return "📊";
+  if (mimetype.includes("sheet") || mimetype.includes("excel")) return "📊";
   return "📁";
+}
+
+async function fetchShareData(token: string): Promise<ShareData | null> {
+  try {
+    const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const res = await fetch(`${base}/api/share/folder/${token}/folders`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
 }
 
 export default async function FolderSharePage({
@@ -47,22 +53,17 @@ export default async function FolderSharePage({
 }: {
   params: Promise<{ token: string }>;
 }) {
-  // Ensure Mongoose is connected before querying the model
-  await connectDB();
-
   const { token } = await params;
+  const data = await fetchShareData(token);
 
-  const share = (await FolderShare.findOne({
-    token,
-    expiresAt: { $gt: new Date() },
-  }).lean()) as ShareDoc | null;
+  if (!data) notFound();
 
-  if (!share) notFound();
-
-  const totalSize   = share.files.reduce((acc, f) => acc + f.size, 0);
-  const expiresDate = new Date(share.expiresAt).toLocaleDateString("en-US", {
-    month: "long", day: "numeric", year: "numeric",
-  });
+  const totalSize = data.files.reduce((acc, f) => acc + f.size, 0);
+  const expiresDate = data.expiresAt
+    ? new Date(data.expiresAt).toLocaleDateString("en-US", {
+        month: "long", day: "numeric", year: "numeric",
+      })
+    : "";
 
   return (
     <>
@@ -141,22 +142,21 @@ export default async function FolderSharePage({
 
       <div className="page">
         <div className="badge">📁 Shared folder</div>
-        <h1>{share.folderName}</h1>
+        <h1>{data.folderName}</h1>
         <p className="meta">
-          <span>{share.files.length} file{share.files.length !== 1 ? "s" : ""}</span>
+          <span>{data.files.length} file{data.files.length !== 1 ? "s" : ""}</span>
           {" · "}
           <span>{formatBytes(totalSize)}</span>
-          {" · "}
-          Expires {expiresDate}
+          {expiresDate && <>{" · "} Expires {expiresDate}</>}
         </p>
 
-        <FolderShareActions token={share.token} canAdd={share.permission === "add"} />
+        <FolderShareActions token={token} canAdd={data.permission === "add"} />
 
-        {share.files.length === 0 ? (
+        {data.files.length === 0 ? (
           <div className="empty">This folder is empty.</div>
         ) : (
           <div className="file-list">
-            {share.files.map((file) => (
+            {data.files.map((file) => (
               <div key={file.fileId} className="file-card">
                 <div className="file-icon">{getFileIcon(file.mimetype)}</div>
                 <div className="file-info">
@@ -164,7 +164,7 @@ export default async function FolderSharePage({
                   <div className="file-meta">{formatBytes(file.size)}</div>
                 </div>
                 <div className="file-btns">
-                  <a className="btn btn-view" href={file.url} target="_blank" rel="noopener noreferrer">
+                  <a className="btn btn-view" href={file.downloadUrl} target="_blank" rel="noopener noreferrer">
                     View ↗
                   </a>
                   <a className="btn btn-dl" href={file.downloadUrl} download={file.filename}>
@@ -177,7 +177,7 @@ export default async function FolderSharePage({
         )}
 
         <div className="footer">
-          This link expires on {expiresDate}. Shared via your storage.
+          {expiresDate && <>This link expires on {expiresDate}. </>}Shared via your storage.
         </div>
       </div>
     </>

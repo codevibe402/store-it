@@ -16,11 +16,12 @@ export async function GET(req: NextRequest) {
   try {
     await connectDB();
 
-    const status = req.nextUrl.searchParams.get("status") || "uploaded";
+    const statusParam = req.nextUrl.searchParams.get("status") || "uploaded";
+    const statuses = statusParam.split(",").map((s) => s.trim()).filter(Boolean);
 
     const files = await File.find({
       owner_email: session.user.email,
-      status,
+      status: statuses.length === 1 ? statuses[0] : { $in: statuses },
     })
       .sort({ createdAt: -1 })
       .lean();

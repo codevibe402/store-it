@@ -1,12 +1,50 @@
 import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/mongoose";
 import Folder from "@/models/Folder";
+import File from "@/models/File";
 import FolderShare from "@/models/Foldershare";
 import User from "@/models/User";
 
 type RouteContext = {
   params: Promise<{ token: string }>;
 };
+
+export async function GET(req: NextRequest, { params }: RouteContext) {
+  const { token } = await params;
+  await connectDB();
+
+  const share = await FolderShare.findOne({
+    token,
+    expiresAt: { $gt: new Date() },
+  }).lean();
+
+  if (!share) {
+    return NextResponse.json({ error: "Share link not found or expired" }, { status: 404 });
+  }
+
+  const files = await File.find({
+    folderId: share.folderId,
+    owner_id: share.owner_id,
+    status: "uploaded",
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return NextResponse.json({
+    folderName: share.folderName,
+    permission: share.permission,
+    expiresAt: share.expiresAt,
+    allowVersionHistory: share.allowVersionHistory,
+    files: files.map((f) => ({
+      fileId: f._id.toString(),
+      filename: f.filename,
+      size: f.size,
+      mimetype: f.mimetype,
+      backend: f.backend,
+      downloadUrl: `/api/share/folder/${token}/files/${f._id}/download`,
+    })),
+  });
+}
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
   const { token } = await params;

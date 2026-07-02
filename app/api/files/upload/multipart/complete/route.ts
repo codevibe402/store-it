@@ -29,7 +29,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Tell S3 to assemble the parts
   await s3.send(
     new CompleteMultipartUploadCommand({
       Bucket: BUCKET,
@@ -48,16 +47,67 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "File record not found" }, { status: 404 });
   }
 
-  // Prevent double-counting if complete is called more than once
   if (file.status !== "uploaded") {
+    const existingByName = file.status === "pending"
+      ? await File.findOne({
+          filename: file.filename,
+          owner_id: file.owner_id,
+          folderId: file.folderId,
+          status: "uploaded",
+          hash: { $ne: file.hash },
+          _id: { $ne: file._id },
+        })
+      : null;
+
+    if (existingByName) {
+      const latestVersion = await FileVersion.findOne({ file_id: existingByName._id })
+        .sort({ version: -1 })
+        .lean();
+      const nextVersion = (latestVersion?.version ?? 1) + 1;
+
+      const version = await FileVersion.create({
+        file_id: existingByName._id,
+        version: nextVersion,
+        backend: "s3",
+        storageUrl: key,
+        hash: file.hash,
+        size: file.size,
+        mimetype: file.mimetype,
+        createdBy: file.owner_id,
+      });
+
+      const oldSize = existingByName.size ?? 0;
+      existingByName.hash = file.hash;
+      existingByName.mimetype = file.mimetype;
+      existingByName.size = file.size;
+      existingByName.storageUrl = key;
+      existingByName.searchText = file.searchText;
+      existingByName.currentVersionId = version._id;
+      await existingByName.save();
+
+      await User.findByIdAndUpdate(file.owner_id, { $inc: { storageused: file.size - oldSize } });
+
+      await File.deleteOne({ _id: file._id });
+
+      return NextResponse.json({ file: existingByName, version: nextVersion, versioned: true }, { status: 200 });
+    }
+
     file.status = "uploaded";
     await file.save();
 
-    await FileVersion.updateOne(
-      { file_id: file._id, version: 1 },
-      { $setOnInsert: { file_id: file._id, version: 1, storage_url: file.storageUrl } },
-      { upsert: true }
-    );
+    const version = await FileVersion.create({
+      file_id: file._id,
+      version: 1,
+      backend: "s3",
+      storageUrl: key,
+      hash: file.hash,
+      size: file.size,
+      mimetype: file.mimetype,
+      createdBy: file.owner_id,
+    });
+
+    file.currentVersionId = version._id;
+    await file.save();
 
     await User.findByIdAndUpdate(file.owner_id, { $inc: { storageused: file.size } });
   }

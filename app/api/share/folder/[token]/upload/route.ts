@@ -14,13 +14,7 @@ type RouteContext = {
 };
 
 function isUploadedFile(value: FormDataEntryValue | null): value is File {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "arrayBuffer" in value &&
-    "name" in value &&
-    "size" in value
-  );
+  return typeof value === "object" && value !== null && "arrayBuffer" in value && "name" in value && "size" in value;
 }
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
@@ -59,52 +53,29 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "Storage limit exceeded" }, { status: 413 });
   }
 
-  const duplicate = await File.findOne({
-    hash,
-    owner_id: user._id,
-    status: "uploaded",
-  }).lean();
-
-  if (duplicate) {
-    return NextResponse.json(
-      { error: "Duplicate file", existingFile: duplicate },
-      { status: 409 }
-    );
-  }
-
   const key = `uploads/${user._id}/${Date.now()}-${filename}`;
   const searchText = await extractSearchText(buffer, filename, mimeType);
 
   await s3.send(
-    new PutObjectCommand({
-      Bucket: BUCKET,
-      Key: key,
-      Body: buffer,
-      ContentType: mimeType,
-      ContentLength: size,
-    })
+    new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: buffer, ContentType: mimeType, ContentLength: size })
   );
 
   const file = await File.create({
-    filename,
-    hash,
-    owner_email: user.email,
-    owner_id: user._id,
-    mimetype: mimeType,
-    size,
-    searchText,
+    filename, hash, owner_email: user.email, owner_id: user._id,
+    mimetype: mimeType, size, searchText,
     textIndexedAt: searchText ? new Date() : null,
-    storageUrl: key,
-    folders_id: share.folderId,
-    folderId: share.folderId,
+    storageUrl: key, backend: "s3",
+    folders_id: share.folderId, folderId: share.folderId,
     status: "uploaded",
   });
 
-  await FileVersion.create({
-    file_id: file._id,
-    version: 1,
-    storage_url: key,
+  const version = await FileVersion.create({
+    file_id: file._id, version: 1, backend: "s3",
+    storageUrl: key, hash, size, mimetype: mimeType, createdBy: user._id,
   });
+
+  file.currentVersionId = version._id;
+  await file.save();
 
   await User.findByIdAndUpdate(user._id, { $inc: { storageused: size } });
 

@@ -42,14 +42,19 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
     file: {
       _id: file._id.toString(),
       filename: file.filename,
+      currentVersionId: file.currentVersionId?.toString(),
       currentVersion: versions[0]?.version ?? 1,
     },
     versions: versions.map((version) => ({
       id: version._id.toString(),
       version: version.version,
       uploadedAt: version.uploadedAt,
-      storageUrl: version.storage_url,
-      isCurrent: version.storage_url === file.storageUrl,
+      backend: version.backend,
+      storageUrl: version.storageUrl,
+      hash: version.hash,
+      size: version.size,
+      mimetype: version.mimetype,
+      isCurrent: file.currentVersionId?.toString() === version._id.toString(),
     })),
   });
 }
@@ -79,14 +84,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "Version not found" }, { status: 404 });
   }
 
-  // ── Strategy: Use presigned URL for version downloads ────────────────────
-  // - Generates 10-minute presigned S3 URLs (for version access control)
-  // - CloudFront caches these presigned URLs for their lifetime
-  // - After 10 minutes, URLs expire and CloudFront stops serving them
-  // - Each version has a unique storageUrl, so they're served separately
-  //
-  // Alternative (future): Could use CloudFront signed URLs if we want
-  // longer-lived version URLs with better performance
+  // For Telegram versions, return a download URL
+  if (version.backend === "telegram") {
+    return NextResponse.json({
+      downloadUrl: `/api/files/${id}/download?versionId=${version._id}`,
+    });
+  }
+
   const url = await getSignedUrl(
     s3,
     new GetObjectCommand({

@@ -42,6 +42,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  if (file.backend !== "telegram") {
+    return NextResponse.json({ error: "File is no longer using Telegram backend" }, { status: 409 });
+  }
+
+  if (!["pending", "uploading", "paused"].includes(file.status)) {
+    return NextResponse.json({ error: "File is not accepting Telegram chunks" }, { status: 409 });
+  }
+
+  if (file.status === "pending" || file.status === "paused") {
+    file.status = "uploading";
+    await file.save();
+  }
+
   const exists = await TelegramChunk.findOne({ fileId, chunkIndex });
   if (exists) {
     return NextResponse.json({ message: "Chunk already uploaded" });
@@ -92,8 +105,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  await File.findByIdAndUpdate(fileId, {
+    $set: {
+      status: "paused",
+      lastError: `Chunk ${chunkIndex} failed after retries: ${lastError?.message ?? "Unknown error"}`,
+    },
+  });
+
   return NextResponse.json(
-    { error: `Chunk ${chunkIndex} failed after retries: ${lastError?.message}` },
-    { status: 500 },
+    {
+      error: `Chunk ${chunkIndex} failed after retries: ${lastError?.message}`,
+      chunkIndex,
+      canFallbackToS3: true,
+    },
+    { status: 503 },
   );
 }

@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
     const uploadedFile = formData.get("file");
     const hash = formData.get("hash");
     const folderId = formData.get("folderId");
+    const fileId = formData.get("fileId") as string | null;
 
     if (!isUploadedFile(uploadedFile) || typeof hash !== "string") {
       return NextResponse.json(
@@ -74,20 +75,51 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const existing = await File.findOne({
-      hash,
-      owner_id: user._id,
-      status: "uploaded",
-    });
+    let existingFileRecord = null;
 
-    if (existing) {
-      return NextResponse.json(
-        { error: "Duplicate file", existingFile: existing },
-        { status: 409 }
-      );
+    if (fileId) {
+      existingFileRecord = await File.findOne({
+        _id: fileId,
+        owner_id: user._id,
+        status: "s3_pending",
+        backend: "s3",
+      });
+      if (!existingFileRecord) {
+        return NextResponse.json(
+          { error: "Fallback file not found or not in s3_pending state" },
+          { status: 404 },
+        );
+      }
+      if (existingFileRecord.hash !== hash) {
+        return NextResponse.json(
+          { error: "Selected file does not match the original. Hash mismatch." },
+          { status: 409 },
+        );
+      }
+      if (size > SMALL_FILE_LIMIT) {
+        return NextResponse.json(
+          { error: "File too large for small upload" },
+          { status: 400 },
+        );
+      }
+    } else {
+      existingFileRecord = await File.findOne({
+        hash,
+        owner_id: user._id,
+        status: "uploaded",
+      });
+
+      if (existingFileRecord) {
+        return NextResponse.json(
+          { error: "Duplicate file", existingFile: existingFileRecord },
+          { status: 409 }
+        );
+      }
     }
 
-    const key = `uploads/${user._id}/${Date.now()}-${filename}`;
+    const key = existingFileRecord
+      ? existingFileRecord.storageUrl
+      : `uploads/${user._id}/${Date.now()}-${filename}`;
 
     const buffer = Buffer.from(await uploadedFile.arrayBuffer());
     const searchText = await extractSearchText(buffer, filename, mimeType);
@@ -102,7 +134,19 @@ export async function POST(req: NextRequest) {
       })
     );
 
-    const previousVersion = await File.findOne({
+    let file;
+    if (existingFileRecord) {
+      file = existingFileRecord;
+      file.status = "uploaded";
+      file.searchText = searchText;
+      file.textIndexedAt = searchText ? new Date() : null;
+      await file.save();
+
+      await User.findByIdAndUpdate(user._id, { $inc: { storageused: size } });
+      return NextResponse.json({ file }, { status: 201 });
+    }
+
+    const existingByName = await File.findOne({
       filename,
       owner_id: user._id,
       folderId: normalizedFolderId,
@@ -110,36 +154,43 @@ export async function POST(req: NextRequest) {
       hash: { $ne: hash },
     });
 
-    if (previousVersion) {
-      const latestVersion = await FileVersion.findOne({ file_id: previousVersion._id })
+    if (existingByName) {
+      const latestVersion = await FileVersion.findOne({ file_id: existingByName._id })
         .sort({ version: -1 })
         .lean();
       const nextVersion = (latestVersion?.version ?? 1) + 1;
 
-      await FileVersion.create({
-        file_id: previousVersion._id,
+      const version = await FileVersion.create({
+        file_id: existingByName._id,
         version: nextVersion,
-        storage_url: key,
+        backend: "s3",
+        storageUrl: key,
+        hash,
+        size,
+        mimetype: mimeType,
+        createdBy: user._id,
       });
 
-      const oldSize = previousVersion.size ?? 0;
-      previousVersion.hash = hash;
-      previousVersion.mimetype = mimeType;
-      previousVersion.size = size;
-      previousVersion.storageUrl = key;
-      previousVersion.searchText = searchText;
-      previousVersion.textIndexedAt = searchText ? new Date() : null;
-      await previousVersion.save();
+      const oldSize = existingByName.size ?? 0;
+      existingByName.hash = hash;
+      existingByName.mimetype = mimeType;
+      existingByName.size = size;
+      existingByName.storageUrl = key;
+      existingByName.backend = "s3";
+      existingByName.searchText = searchText;
+      existingByName.textIndexedAt = searchText ? new Date() : null;
+      existingByName.currentVersionId = version._id;
+      await existingByName.save();
 
       await User.findByIdAndUpdate(user._id, { $inc: { storageused: size - oldSize } });
 
       return NextResponse.json(
-        { file: previousVersion, version: nextVersion, versioned: true },
+        { file: existingByName, version: nextVersion, versioned: true },
         { status: 201 }
       );
     }
 
-    const file = await File.create({
+    file = await File.create({
       filename,
       hash,
       owner_email: user.email,
@@ -149,16 +200,25 @@ export async function POST(req: NextRequest) {
       searchText,
       textIndexedAt: searchText ? new Date() : null,
       storageUrl: key,
+      backend: "s3",
       folders_id: normalizedFolderId,
       folderId: normalizedFolderId,
       status: "uploaded",
     });
 
-    await FileVersion.create({
+    const version = await FileVersion.create({
       file_id: file._id,
       version: 1,
-      storage_url: key,
+      backend: "s3",
+      storageUrl: key,
+      hash,
+      size,
+      mimetype: mimeType,
+      createdBy: user._id,
     });
+
+    file.currentVersionId = version._id;
+    await file.save();
 
     await User.findByIdAndUpdate(user._id, { $inc: { storageused: size } });
 

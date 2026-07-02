@@ -21,7 +21,7 @@ type FileType = {
   hash?: string;
   storageUrl: string;
   owner_id: string;
-  status: "pending" | "uploaded";
+  status: "pending" | "uploading" | "paused" | "fallback_cleanup" | "s3_pending" | "uploaded" | "cancelled" | "failed";
   folderId: string | null;
   createdAt: string;
   backend?: "s3" | "telegram";
@@ -231,7 +231,7 @@ export default function FileUpload() {
   const { data: pendingFiles = [], isLoading: pendingLoading } = useQuery<FileType[]>({
     queryKey: ["pending-files"],
     queryFn: async () => {
-      const res = await fetch("/api/files/fetch?status=pending");
+      const res = await fetch("/api/files/fetch?status=pending,uploading,paused,fallback_cleanup,s3_pending");
       if (!res.ok) throw new Error("Failed to fetch pending files");
       return res.json();
     },
@@ -318,6 +318,67 @@ export default function FileUpload() {
       .join("");
   }
 
+  async function s3FallbackUpload(file: File, hash: string, fileId: string, onProgress: (pct: number) => void) {
+    if (file.size < SMALL_FILE_LIMIT) {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("hash", hash);
+      formData.append("fileId", fileId);
+
+      const res = await fetch("/api/files/upload", {
+        method: "POST", body: formData,
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({ error: "S3 fallback upload failed" }));
+        throw new Error(errBody.error || "S3 fallback upload failed");
+      }
+      onProgress(100);
+      return res.json();
+    }
+
+    const initRes = await fetch("/api/files/upload/multipart/init", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: file.name, mimeType: file.type, size: file.size, hash, fileId,
+      }),
+    });
+    if (!initRes.ok) {
+      const errBody = await initRes.json().catch(() => ({ error: "Failed to init S3 multipart fallback" }));
+      throw new Error(errBody.error || "Failed to init S3 multipart fallback");
+    }
+    const { uploadId, key, totalParts } = await initRes.json();
+
+    const partNumbers = Array.from({ length: totalParts }, (_, i) => i + 1);
+    const presignRes = await fetch("/api/files/upload/multipart/presign", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, uploadId, partNumbers }),
+    });
+    if (!presignRes.ok) throw new Error("Failed to get presigned URLs");
+    const { urls } = await presignRes.json();
+
+    let uploadedBytes = 0;
+    const parts = await Promise.all(urls.map(async (url: string, i: number) => {
+      if (cancelRef.current) throw { isCancelled: true };
+      const start = i * CHUNK_SIZE;
+      const chunk = file.slice(start, Math.min(start + CHUNK_SIZE, file.size));
+      const res = await fetch(url, { method: "PUT", body: chunk });
+      if (!res.ok) throw new Error(`Failed to upload part ${i + 1}`);
+      const ETag = res.headers.get("ETag") ?? "";
+      uploadedBytes += chunk.size;
+      onProgress(Math.round((uploadedBytes / file.size) * 100));
+      return { PartNumber: i + 1, ETag };
+    }));
+
+    const completeRes = await fetch("/api/files/upload/multipart/complete", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, uploadId, parts, fileId }),
+    });
+    if (!completeRes.ok) throw new Error("Failed to complete S3 multipart fallback");
+
+    queryClient.invalidateQueries({ queryKey: ["files"] });
+    return completeRes.json();
+  }
+
   async function telegramUpload(file: File, hash: string, onProgress: (pct: number) => void) {
     const totalChunks = Math.ceil(file.size / TELEGRAM_CHUNK_SIZE);
 
@@ -371,12 +432,19 @@ export default function FileUpload() {
             const res = await fetch("/api/files/telegram/chunk", {
               method: "POST", body: formData, signal: controller.signal,
             });
-            if (!res.ok) throw new Error(`Status ${res.status}`);
+            if (!res.ok) {
+              const errBody = await res.json().catch(() => ({}));
+              const err = new Error(`Status ${res.status}`) as any;
+              err.canFallbackToS3 = errBody.canFallbackToS3 === true;
+              err.chunkIndex = errBody.chunkIndex;
+              throw err;
+            }
             success = true;
             uploadedBytes += chunkBlob.size;
             onProgress(Math.round((uploadedBytes / file.size) * 100));
           } catch (err: any) {
             if (cancelRef.current || controller.signal.aborted) throw { isCancelled: true };
+            if (err.canFallbackToS3) throw err;
             if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
             else throw new Error(`Chunk ${index} failed after 3 attempts`);
           }
@@ -387,8 +455,35 @@ export default function FileUpload() {
     const workers = Array.from({ length: TELEGRAM_CONCURRENCY }, () => worker());
     try {
       await Promise.all(workers);
-    } catch (err) {
+    } catch (err: any) {
       abortRef.current = null;
+      cancelRef.current = true;
+      controller.abort();
+
+      if (err?.canFallbackToS3) {
+        currentFileIdRef.current = null;
+        try {
+          const fallbackRes = await fetch(`/api/files/${fileId}/fallback-to-s3`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason: "telegram_chunk_failed" }),
+          });
+          if (!fallbackRes.ok) {
+            const fbErr = await fallbackRes.json().catch(() => ({ error: "Fallback failed" }));
+            throw new Error(fbErr.error || "Fallback to S3 failed");
+          }
+
+          onProgress(0);
+
+          await s3FallbackUpload(file, hash, fileId, onProgress);
+
+          queryClient.invalidateQueries({ queryKey: ["files"] });
+          return;
+        } catch (fallbackErr: any) {
+          throw new Error(`Telegram upload failed and S3 fallback also failed: ${fallbackErr.message}`);
+        }
+      }
+
       currentFileIdRef.current = null;
       throw err;
     }
