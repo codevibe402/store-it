@@ -5,13 +5,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {useReducer} from "react"
 import FileSearch from "./filesearch";
-// â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Constants --
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 const CHUNK_SIZE = 10 * 1024 * 1024;
 const TELEGRAM_CHUNK_SIZE = 4 * 1024 * 1024;
 const TELEGRAM_CONCURRENCY = 6;
 
-// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Types --
 type UploadStatus = "idle" | "uploading" | "success" | "error" | "duplicate";
 
 type FileType = {
@@ -76,7 +76,7 @@ type TelegramChunkError = Error & {
   isCancelled?: boolean;
 };
 
-// â”€â”€ Utils â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Utils --
 async function getFileHash(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
   const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
@@ -116,14 +116,14 @@ function isAbortLike(error: unknown) {
 }
 
 function getFileIcon(mimetype: string): string {
-  if (mimetype.startsWith("image/")) return "ðŸ–¼ï¸";
-  if (mimetype.startsWith("video/")) return "ðŸŽ¬";
-  if (mimetype.startsWith("audio/")) return "ðŸŽµ";
-  if (mimetype.includes("pdf")) return "ðŸ“„";
-  if (mimetype.includes("zip") || mimetype.includes("compressed")) return "ðŸ—œï¸";
-  if (mimetype.includes("word") || mimetype.includes("document")) return "ðŸ“";
-  if (mimetype.includes("sheet") || mimetype.includes("excel")) return "ðŸ“Š";
-  return "ðŸ“";
+  if (mimetype.startsWith("image/")) return "[IMG]";
+  if (mimetype.startsWith("video/")) return "[VID]";
+  if (mimetype.startsWith("audio/")) return "[AUD]";
+  if (mimetype.includes("pdf")) return "[PDF]";
+  if (mimetype.includes("zip") || mimetype.includes("compressed")) return "[ARC]";
+  if (mimetype.includes("word") || mimetype.includes("document")) return "[DOC]";
+  if (mimetype.includes("sheet") || mimetype.includes("excel")) return "[SHT]";
+  return "[FILE]";
 }
 type UploadAction= 
     | { type: "UPLOAD_START" }
@@ -144,7 +144,7 @@ function reducer(state: uploadstate,action: UploadAction):uploadstate{
 
 }
 
-// â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Component --
 export default function FileUpload() {
   const [state, dispatch] = useReducer(reducer, initialState);
 
@@ -211,7 +211,7 @@ export default function FileUpload() {
     return () => window.removeEventListener("click", close);
   }, []);
 
-  // â”€â”€ Queries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Queries --
   const { data: dashboard, isLoading: dashboardLoading } = useQuery<{
     files: FileType[];
     folders: FolderType[];
@@ -243,7 +243,7 @@ export default function FileUpload() {
     return new Error(data.error || fallback);
   }
 
-  // â”€â”€ Small upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Small upload --
   const smallUploadMutation = useMutation({
     mutationFn: async ({ file, hash }: { file: File; hash: string }) => {
       const formData = new FormData();
@@ -265,7 +265,7 @@ export default function FileUpload() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
   });
 
-  // â”€â”€ Multipart upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Multipart upload --
   async function multipartUpload(file: File, hash: string, onProgress: (pct: number) => void) {
     const initRes = await fetch("/api/files/upload/multipart/init", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -545,7 +545,7 @@ export default function FileUpload() {
     return (await res.json()).url;
   };
 
-  // â”€â”€ File actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- File actions --
   const openFile = async (file: FileType) => {
     if (file.backend === "telegram") {
       window.open(`/api/files/telegram/${file._id}/download`, "_blank");
@@ -750,7 +750,7 @@ export default function FileUpload() {
     } catch { setToast({ msg: "Could not create folder.", type: "error" }); }
   };
 
-  // â”€â”€ Upload flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Upload flow --
   const handleCancel = async () => {
     cancelRef.current = true;
     pauseRef.current = false;
@@ -904,7 +904,7 @@ export default function FileUpload() {
 
   const currentFolder = folders.find((f) => f._id === currentFolderId);
 
-  // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Render --
   return (
     <>
 
@@ -912,7 +912,7 @@ export default function FileUpload() {
 
       <div className="fu-root">
 
-        {/* â”€â”€ Top nav â”€â”€ */}
+        {/* -- Top nav -- */}
         <div className="fu-topbar">
           <div className="fu-topbar-brand">Storage</div>
           <div className="fu-topbar-actions">
@@ -928,7 +928,7 @@ export default function FileUpload() {
           </div>
         </div>
 
-        {/* â”€â”€ Folder tabs â”€â”€ */}
+        {/* -- Folder tabs -- */}
         <div className="fu-tabs-wrap">
           <button
             className={`fu-tab ${currentFolderId === null ? "active" : ""}`}
@@ -964,7 +964,7 @@ export default function FileUpload() {
                 onKeyDown={(e) => { if (e.key === "Enter") createFolder(); if (e.key === "Escape") setShowNewFolder(false); }}
                 autoFocus
               />
-              <button className="fu-btn-pill" onClick={() => setShowNewFolder(false)}>âœ•</button>
+              <button className="fu-btn-pill" onClick={() => setShowNewFolder(false)}>x</button>
               <button className="fu-btn-pill accent" onClick={createFolder}>Create</button>
             </div>
           ) : (
@@ -972,7 +972,7 @@ export default function FileUpload() {
           )}
         </div>
 
-        {/* â”€â”€ Main content â”€â”€ */}
+        {/* -- Main content -- */}
         <div className="fu-shell">
         <div className="fu-content">
 
@@ -985,9 +985,9 @@ export default function FileUpload() {
             </div>
             {currentFolder && (
               <div className="fu-header-actions">
-                <button className="fu-action-btn" onClick={() => downloadFolder(currentFolder)}>
-                  â¬‡ Download folder
-                </button>
+                  <button className="fu-action-btn" onClick={() => downloadFolder(currentFolder)}>
+                    Download folder
+                  </button>
                 <button className="fu-action-btn" onClick={() => openFolderShareModal(currentFolder, "read")}>
                   Share read link
                 </button>
@@ -1017,59 +1017,13 @@ export default function FileUpload() {
 
             {status === "idle" && (
               <>
-                <div className="fu-dropzone-icon">â˜ï¸</div>
+                <div className="fu-dropzone-icon"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></div>
                 <div className="fu-dropzone-title">
                   Drop your file here{currentFolder ? ` into "${currentFolder.name}"` : ""}
                 </div>
                 <div className="fu-dropzone-sub">
-                  or <span>browse</span> â€” under 10 MB uploads instantly, larger files use multipart
+                  or <span>browse</span> -- under 10 MB uploads instantly, larger files use multipart
                 </div>
-                {pendingFiles.length > 0 && (
-                  <div className="fu-pending-banner" onClick={(e) => e.stopPropagation()}>
-                    <div className="fu-pending-banner-title">
-                      â³ {pendingFiles.length} pending upload{pendingFiles.length > 1 ? "s" : ""}
-                    </div>
-                    {pendingFiles.map((pf) => (
-                      <div key={pf._id} className="fu-pending-row">
-                        <span className="fu-pending-name">{pf.filename}</span>
-                        <span className="fu-pending-meta">{formatBytes(pf.size)}</span>
-                        <button
-                          className="fu-pending-btn resume"
-                          disabled={resumingId === pf._id}
-                          onClick={async () => {
-                            const fileInput = document.createElement("input");
-                            fileInput.type = "file";
-                            fileInput.onchange = async () => {
-                              const f = fileInput.files?.[0];
-                              if (f) await handleResume(pf, f);
-                            };
-                            fileInput.click();
-                          }}
-                        >
-                          {resumingId === pf._id ? "âŸ³ Resuming..." : "âŸ³ Resume"}
-                        </button>
-                        <button
-                          className="fu-pending-btn cancel"
-                          onClick={async () => {
-                            try {
-                              await fetch("/api/files/telegram/cancel", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ fileId: pf._id }),
-                              });
-                              queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-                              setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" });
-                            } catch {
-                              setToast({ msg: "Failed to cancel.", type: "error" });
-                            }
-                          }}
-                        >
-                          âœ•
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </>
             )}
             {status === "uploading" && (
@@ -1080,8 +1034,8 @@ export default function FileUpload() {
                 </div>
                 <div className="fu-bar-bg"><div className="fu-bar-fill" style={{ width: `${progress}%` }} /></div>
                 <div style={{ display: "flex", gap: 6 }}>
-                  <button className="fu-cancel-btn" onClick={handlePause}>â¸ Pause</button>
-                  <button className="fu-cancel-btn" onClick={handleCancel}>âœ• Cancel</button>
+                  <button className="fu-cancel-btn" onClick={handlePause}>Pause</button>
+                  <button className="fu-cancel-btn" onClick={handleCancel}>Cancel</button>
                 </div>
               </div>
             )}
@@ -1090,31 +1044,82 @@ export default function FileUpload() {
             )}
             {status === "error" && (
               <>
-                <div className="fu-status error">âœ• {errorMsg || "Upload failed"}</div>
+                <div className="fu-status error">{errorMsg || "Upload failed"}</div>
                 <div className="fu-dropzone-sub" style={{ marginTop: 4 }}>Click to try again</div>
               </>
             )}
             {status === "duplicate" && duplicateFile && (
               <div className="fu-duplicate" onClick={(e) => e.stopPropagation()}>
-                <div className="fu-duplicate-title">âš  Duplicate file detected</div>
+                <div className="fu-duplicate-title">Duplicate file detected</div>
                 <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
                   <span>{duplicateFile.filename}</span> already exists in your storage.
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button className="fu-dup-open-btn" onClick={async () => openFile(duplicateFile)}>
-                    Open existing â†’
+                    Open existing
                   </button>
                   <button
                     className="fu-dup-open-btn"
                     style={{ background: "rgba(108,142,255,0.1)", borderColor: "rgba(108,142,255,0.3)", color: "var(--accent)" }}
                     onClick={() => downloadFile(duplicateFile)}
                   >
-                    â¬‡ Download
+                    Download
                   </button>
                 </div>
               </div>
             )}
           </div>
+
+          {/* Active Uploads */}
+          {pendingFiles.length > 0 && (
+            <div>
+              <div className="fu-section-header">
+                <span className="fu-section-title">Active Uploads</span>
+                <span className="fu-section-count">{pendingFiles.length}</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {pendingFiles.map((pf) => (
+                  <div key={pf._id} className="fu-pending-row" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+                    <span className="fu-pending-name">{pf.filename}</span>
+                    <span className="fu-pending-meta">{formatBytes(pf.size)}</span>
+                    <button
+                      className="fu-pending-btn resume"
+                      disabled={resumingId === pf._id}
+                      onClick={async () => {
+                        const fileInput = document.createElement("input");
+                        fileInput.type = "file";
+                        fileInput.onchange = async () => {
+                          const f = fileInput.files?.[0];
+                          if (f) await handleResume(pf, f);
+                        };
+                        fileInput.click();
+                      }}
+                    >
+                      {resumingId === pf._id ? "Resuming..." : "Resume"}
+                    </button>
+                    <button
+                      className="fu-pending-btn cancel"
+                      onClick={async () => {
+                        try {
+                          await fetch("/api/files/telegram/cancel", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ fileId: pf._id }),
+                          });
+                          queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+                          setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" });
+                        } catch {
+                          setToast({ msg: "Failed to cancel.", type: "error" });
+                        }
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Folders grid */}
           {!foldersLoading && visibleFolders.length > 0 && (
@@ -1131,8 +1136,8 @@ export default function FileUpload() {
                     onClick={() => setCurrentFolderId(folder._id)}
                     onContextMenu={(e) => openCtx(e, folder, "folder")}
                   >
-                    <button className="fu-folder-card-opts" onClick={(e) => { e.stopPropagation(); openCtx(e, folder, "folder"); }}>â‹¯</button>
-                    <div className="fu-folder-icon">ðŸ“</div>
+                    <button className="fu-folder-card-opts" onClick={(e) => { e.stopPropagation(); openCtx(e, folder, "folder"); }}>...</button>
+                    <div className="fu-folder-icon">[FOLDER]</div>
                     <div className="fu-folder-name">{folder.name}</div>
                     <div className="fu-folder-count">{uploadedFiles.filter((f) => f.folderId === folder._id).length} files</div>
                   </div>
@@ -1151,7 +1156,7 @@ export default function FileUpload() {
               <><div className="fu-skeleton" /><div className="fu-skeleton" /><div className="fu-skeleton" /></>
             ) : visibleFiles.length === 0 ? (
               <div className="fu-empty">
-                <div className="fu-empty-icon">ðŸ“‚</div>
+                <div className="fu-empty-icon">[DIR]</div>
                 <div>{currentFolder ? "No files in this folder yet" : "No files uploaded yet"}</div>
               </div>
             ) : (
@@ -1161,10 +1166,10 @@ export default function FileUpload() {
                   <div className="fu-file-info">
                     <div className="fu-file-name">{file.filename}</div>
                     <div className="fu-file-meta">
-                      {formatBytes(file.size)} Â· {new Date(file.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                      {formatBytes(file.size)} - {new Date(file.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                       {file.folderId && folders.find(f => f._id === file.folderId) && (
                         <span style={{ marginLeft: 6, color: "var(--folder-color)", fontSize: "0.68rem" }}>
-                          ðŸ“ {folders.find(f => f._id === file.folderId)?.name}
+                          [FOLDER] {folders.find(f => f._id === file.folderId)?.name}
                         </span>
                       )}
                     </div>
@@ -1172,11 +1177,11 @@ export default function FileUpload() {
                   <div className="fu-file-actions">
                     <button className="fu-icon-btn open"
                       onClick={async () => openFile(file)}>
-                      Open â†—
+                      Open
                     </button>
                     <button className="fu-icon-btn share" onClick={() => openShareModal(file)}>Share</button>
                     <button className="fu-icon-btn" onClick={() => openVersions(file)}>Versions</button>
-                    <button className="fu-icon-btn" onClick={() => downloadFile(file)}>â¬‡</button>
+                    <button className="fu-icon-btn" onClick={() => downloadFile(file)}>Download</button>
 
                     {/* Three-dot menu */}
                     <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
@@ -1185,7 +1190,7 @@ export default function FileUpload() {
                         style={openMenuId === file._id ? { borderColor: "var(--border-hover)", color: "var(--text)" } : {}}
                         onClick={() => setOpenMenuId(openMenuId === file._id ? null : file._id)}
                       >
-                        â‹¯
+                        ...
                       </button>
 
                       {openMenuId === file._id && (
@@ -1197,7 +1202,7 @@ export default function FileUpload() {
                         }}>
                           <button className="fu-ctx-item"
                             onClick={async () => { await openFile(file); setOpenMenuId(null); }}>
-                            â†— Open
+                            Open
                           </button>
                           <button className="fu-ctx-item"
                             onClick={() => { openShareModal(file); setOpenMenuId(null); }}>
@@ -1209,7 +1214,7 @@ export default function FileUpload() {
                           </button>
                           <button className="fu-ctx-item"
                             onClick={() => { downloadFile(file); setOpenMenuId(null); }}>
-                            â¬‡ Download
+                    Download
                           </button>
                           <button className="fu-ctx-item"
                             onClick={() => { setMoveTarget(file); setOpenMenuId(null); }}>
@@ -1229,67 +1234,6 @@ export default function FileUpload() {
             )}
           </div>
 
-          {/* â”€â”€ Pending Uploads â”€â”€ */}
-          {!pendingLoading && pendingFiles.length > 0 && (
-            <div>
-              <div className="fu-section-header">
-                <span className="fu-section-title">â³ Pending Uploads</span>
-                <span className="fu-section-count">{pendingFiles.length}</span>
-              </div>
-              {pendingFiles.map((pf) => (
-                <div key={pf._id} className="fu-file-card" style={{ borderColor: "rgba(251,191,36,0.3)" }}>
-                  <div className="fu-file-icon">â³</div>
-                  <div className="fu-file-info">
-                    <div className="fu-file-name">{pf.filename}</div>
-                    <div className="fu-file-meta">
-                      {formatBytes(pf.size)} Â· {new Date(pf.createdAt).toLocaleDateString()} Â· {pf.backend === "telegram" ? "â˜ï¸ Telegram" : "â˜ï¸ S3"}
-                    </div>
-                  </div>
-                  <div className="fu-file-actions">
-                    <button
-                      className="fu-icon-btn"
-                      style={{
-                        color: "var(--warn)",
-                        borderColor: "rgba(251,191,36,0.3)",
-                        opacity: resumingId === pf._id ? 0.5 : 1,
-                      }}
-                      disabled={resumingId === pf._id}
-                      onClick={() => {
-                        const fileInput = document.createElement("input");
-                        fileInput.type = "file";
-                        fileInput.onchange = async () => {
-                          const f = fileInput.files?.[0];
-                          if (f) await handleResume(pf, f);
-                        };
-                        fileInput.click();
-                      }}
-                    >
-                      {resumingId === pf._id ? "âŸ³ Resuming..." : "âŸ³ Resume"}
-                    </button>
-                    <button
-                      className="fu-icon-btn danger"
-                      onClick={async () => {
-                        try {
-                          const res = await fetch(`/api/files/telegram/cancel`, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ fileId: pf._id }),
-                          });
-                          if (!res.ok) throw new Error("Failed");
-                          queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-                          setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" });
-                        } catch {
-                          setToast({ msg: "Failed to cancel upload.", type: "error" });
-                        }
-                      }}
-                    >
-                      âœ•
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
         <aside className="fu-insights">
           <div className="fu-trust-card">
@@ -1308,14 +1252,14 @@ export default function FileUpload() {
         </div>
       </div>
 
-      {/* â”€â”€ Context menu â”€â”€ */}
+      {/* -- Context menu -- */}
       {ctxMenu && (
         <div className="fu-ctx" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
           {ctxMenu.itemType === "file" ? (
             <>
-              <button className="fu-ctx-item" onClick={async () => { await openFile(ctxMenu.item as FileType); setCtxMenu(null); }}>â†— Open</button>
+              <button className="fu-ctx-item" onClick={async () => { await openFile(ctxMenu.item as FileType); setCtxMenu(null); }}>Open</button>
               <button className="fu-ctx-item" onClick={() => { openShareModal(ctxMenu.item as FileType); setCtxMenu(null); }}>Share</button>
-              <button className="fu-ctx-item" onClick={() => { downloadFile(ctxMenu.item as FileType); setCtxMenu(null); }}>â¬‡ Download</button>
+              <button className="fu-ctx-item" onClick={() => { downloadFile(ctxMenu.item as FileType); setCtxMenu(null); }}>Download</button>
               <button className="fu-ctx-item" onClick={() => { setMoveTarget(ctxMenu.item as FileType); setCtxMenu(null); }}>Move to folder</button>
               <div className="fu-ctx-sep" />
               <button className="fu-ctx-item danger" onClick={() => { setDeleteTarget({ type: "file", item: ctxMenu.item as FileType }); setCtxMenu(null); }}>Delete</button>
@@ -1326,7 +1270,7 @@ export default function FileUpload() {
               <button className="fu-ctx-item" onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "read"); setCtxMenu(null); }}>Share read link</button>
               <button className="fu-ctx-item" onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "add"); setCtxMenu(null); }}>Share write link</button>
               <button className="fu-ctx-item" onClick={() => { setMoveFolderTarget(ctxMenu.item as FolderType); setCtxMenu(null); }}>Move folder</button>
-              <button className="fu-ctx-item" onClick={() => { downloadFolder(ctxMenu.item as FolderType); setCtxMenu(null); }}>â¬‡ Download as ZIP</button>
+              <button className="fu-ctx-item" onClick={() => { downloadFolder(ctxMenu.item as FolderType); setCtxMenu(null); }}>Download as ZIP</button>
               <div className="fu-ctx-sep" />
               <button className="fu-ctx-item danger" onClick={() => { setDeleteTarget({ type: "folder", item: ctxMenu.item as FolderType }); setCtxMenu(null); }}>Delete folder</button>
             </>
@@ -1334,7 +1278,7 @@ export default function FileUpload() {
         </div>
       )}
 
-      {/* â”€â”€ Share modal â”€â”€ */}
+      {/* -- Share modal -- */}
       {shareTarget && (
         <div className="fu-overlay" onClick={() => setShareTarget(null)}>
           <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
@@ -1368,11 +1312,11 @@ export default function FileUpload() {
               <div className="fu-share-url-wrap">
                 <input className="fu-share-url" readOnly value={shareUrl} />
                 <button className={`fu-copy-btn ${shareCopied ? "copied" : ""}`} onClick={copyShareUrl}>
-                  {shareCopied ? "âœ“ Copied" : "Copy"}
+                  {shareCopied ? "Copied" : "Copy"}
                 </button>
               </div>
             ) : (
-              <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Generating linkâ€¦</div>
+              <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Generating link...</div>
             )}
             <div className="fu-modal-actions">
               <button className="fu-modal-btn secondary" onClick={() => setShareTarget(null)}>Close</button>
@@ -1381,7 +1325,7 @@ export default function FileUpload() {
         </div>
       )}
 
-      {/* â”€â”€ Move modal â”€â”€ */}
+      {/* -- Move modal -- */}
       {moveTarget && (
         <div className="fu-overlay" onClick={() => setMoveTarget(null)}>
           <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
@@ -1453,7 +1397,7 @@ export default function FileUpload() {
         </div>
       )}
 
-      {/* â”€â”€ Version history modal â”€â”€ */}
+      {/* -- Version history modal -- */}
       {versionTarget && (
         <div className="fu-overlay" onClick={() => setVersionTarget(null)}>
           <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
@@ -1461,7 +1405,7 @@ export default function FileUpload() {
             <div className="fu-modal-sub">Every saved version of <span>{versionTarget.filename}</span> is visible here.</div>
             <div className="fu-folder-picker">
               {versionsLoading ? (
-                <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Loading versionsâ€¦</div>
+                <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Loading versions...</div>
               ) : versions.length === 0 ? (
                 <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>No versions recorded yet.</div>
               ) : (
@@ -1482,11 +1426,11 @@ export default function FileUpload() {
         </div>
       )}
 
-      {/* â”€â”€ Delete confirm modal â”€â”€ */}
+      {/* -- Delete confirm modal -- */}
       {deleteTarget && (
         <div className="fu-overlay" onClick={() => setDeleteTarget(null)}>
           <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="fu-modal-title">âš  Confirm delete</div>
+            <div className="fu-modal-title">Confirm delete</div>
             <div className="fu-modal-sub">
               {deleteTarget.type === "file"
                 ? `Delete "${(deleteTarget.item as FileType).filename}"? This cannot be undone.`
@@ -1500,10 +1444,10 @@ export default function FileUpload() {
         </div>
       )}
 
-      {/* â”€â”€ Toast â”€â”€ */}
+      {/* -- Toast -- */}
       {toast && (
         <div className={`fu-toast ${toast.type}`}>
-          {toast.type === "success" ? "âœ“" : toast.type === "warn" ? "âš " : "âœ•"} {toast.msg}
+          {toast.type === "success" ? "+" : toast.type === "warn" ? "!" : "x"} {toast.msg}
         </div>
       )}
     </>
