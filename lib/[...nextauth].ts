@@ -32,42 +32,46 @@ export const authOptions: NextAuthOptions = {
         password: { label: 'Password', type: 'password' },
       },
    async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
-          throw new Error('Email and password are required');
-        }
+         if (typeof credentials?.email !== 'string' || typeof credentials?.password !== 'string') {
+           throw new Error('Invalid credentials');
+         }
 
-     try {
-  await connectDB();
-} catch (err) {
-  console.error("Database connection error:", err);
-  throw new Error("Failed to connect to the database");
-}
-        const user = await User.findOne({
-          email: credentials.email.toLowerCase().trim(),
-        }).select('+password');
+         const email = credentials.email.toLowerCase().trim();
+         const password = credentials.password;
 
-        if (!user) {
-          throw new Error('No account found with this email');
-        }
+         if (!email || password.length < 6) {
+           throw new Error('Invalid credentials');
+         }
 
-        if (user.provider !== 'credentials' || !user.password) {
-          throw new Error('This email is linked to a Google account. Please sign in with Google.');
-        }
+         try {
+           await connectDB();
+         } catch {
+           throw new Error('Invalid credentials');
+         }
 
-        const isValid = await bcrypt.compare(credentials.password, user.password);
-        if (!isValid) {
-          throw new Error('Invalid email or password');
-        }
+         const user = await User.findOne({ email }).select('+password');
+         if (!user) {
+           throw new Error('Invalid credentials');
+         }
 
-        return {
-          id: user._id.toString(),
-          name: user.name,
-          email: user.email,
-          image: user.image ?? null,
-          storageused: user.storageused,
-          storagelimit: user.storagelimit,
-        };
-      },
+         if (user.provider !== 'credentials' || !user.password) {
+           throw new Error('Invalid credentials');
+         }
+
+         const isValid = await bcrypt.compare(password, user.password);
+         if (!isValid) {
+           throw new Error('Invalid credentials');
+         }
+
+         return {
+           id: user._id.toString(),
+           name: user.name,
+           email: user.email,
+           image: user.image ?? null,
+           storageused: user.storageused,
+           storagelimit: user.storagelimit,
+         };
+       },
     }),
   ],
 

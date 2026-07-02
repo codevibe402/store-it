@@ -29,6 +29,7 @@ import {
 import {InputGroup} from "./ui/input-group"
 
 import { Input } from "./ui/input"
+import { sanitizeEmail, sanitizeUsername, sanitizePassword } from "@/lib/security"
 
 type FormType = "sign-up" | "sign-in"
 
@@ -40,13 +41,13 @@ type FormValues = {
 
 const signInSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6),
+  password: z.string().min(6).max(128),
 })
 
 const signUpSchema = z.object({
   email: z.string().email(),
-  username: z.string().min(1, "Username is required"),
-  password: z.string().min(6),
+  username: z.string().min(1, "Username is required").max(50),
+  password: z.string().min(6).max(128),
 })
 
 const Authform = () => {
@@ -67,65 +68,55 @@ const Authform = () => {
 
 
 async function onSubmit(data: FormValues) {
+  const safeEmail = sanitizeEmail(data.email)
+  const safePassword = sanitizePassword(data.password)
+
+  if (!safeEmail || !safePassword) {
+    toast.error("Invalid input")
+    return
+  }
+
   try {
-    // ================= SIGN UP =================
-      if (type === "sign-up") {
-      const res = await fetch("/api/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(data),
-      });
-
-      const result = await res.json();
-
-      // SHOW BACKEND ERROR
-      if (!res.ok) {
-        toast.error(result.error || "Registration failed");
-        return;
+    if (type === "sign-up") {
+      const safeUsername = sanitizeUsername(data.username)
+      if (!safeUsername) {
+        toast.error("Invalid input")
+        return
       }
 
-      // SUCCESS
-      toast.success("Registration successful!");
+      const res = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: safeUsername, email: safeEmail, password: safePassword }),
+      })
 
-      // RESET FORM
-      form.reset({
-        email: "",
-        username: "",
-        password: "",
-      });
+      if (!res.ok) {
+        toast.error("Registration failed")
+        return
+      }
 
-      // SWITCH TO SIGN IN
-      setType("sign-in");
-
-      // OPTIONAL ROUTE CHANGE
-      router.push("/sign_in");
-
-      return;
+      toast.success("Registration successful!")
+      form.reset({ email: "", username: "", password: "" })
+      setType("sign-in")
+      router.push("/sign_in")
+      return
     }
 
-    // ================= SIGN IN =================
     const res = await signIn("credentials", {
-      email: data.email,
-      password: data.password,
+      email: safeEmail,
+      password: safePassword,
       redirect: false,
-    });
+    })
 
-    // INVALID CREDENTIALS
     if (res?.error) {
-      toast.error("Invalid credentials");
-      return;
+      toast.error("Invalid credentials")
+      return
     }
 
-    // SUCCESS
-    toast.success("Logged in successfully!");
-
-    router.push("/dashboard");
-
-  } catch (error) {
-    console.log(error);
-    toast.error("Something went wrong");
+    toast.success("Logged in successfully!")
+    router.push("/dashboard")
+  } catch {
+    toast.error("Something went wrong")
   }
 }
   const handleTypeSwitch = (newType: FormType) => {
