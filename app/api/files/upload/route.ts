@@ -9,7 +9,7 @@ import FileVersion from "@/models/FileVersion";
 import User from "@/models/User";
 import { extractSearchText } from "@/lib/fileText";
 
-const MAX_SIZE = 10 * 1024 * 1024;
+const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 
 function isUploadedFile(value: FormDataEntryValue | null): value is File {
   return (
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (size > MAX_SIZE) {
+    if (size > SMALL_FILE_LIMIT) {
       return NextResponse.json(
         { error: "File too large" },
         { status: 400 }
