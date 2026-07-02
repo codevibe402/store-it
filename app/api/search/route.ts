@@ -2,7 +2,6 @@ import { getServerSession } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { authOptions } from "@/lib/[...nextauth]";
 import connectDB from "@/lib/mongoose";
-import { getCacheControlHeader } from "@/lib/cdn";
 import File from "@/models/File";
 
 function escapeRegex(value: string) {
@@ -28,6 +27,7 @@ export async function GET(req: NextRequest) {
     status: "uploaded",
     $or: [{ filename: regex }, { searchText: regex }, { mimetype: regex }],
   })
+    .select("_id filename mimetype size storageUrl folderId folders_id createdAt searchText")
     .sort({ updatedAt: -1 })
     .limit(12)
     .lean();
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
     })),
   });
   
-  response.headers.set('Cache-Control', getCacheControlHeader('search'));
+  response.headers.set('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
   return response;
 }
 
