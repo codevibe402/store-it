@@ -5,6 +5,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {useReducer} from "react"
 import FileSearch from "./filesearch";
+import { storeFile, getFile, removeFile } from "@/lib/indexedDB";
+// -- In-memory file cache for resume (same-session only) --
+const resumeFileMap = new Map<string, FileSystemFileHandle>();
+
 // -- Constants --
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 const CHUNK_SIZE = 10 * 1024 * 1024;
@@ -193,6 +197,7 @@ export default function FileUpload() {
   const currentUploadRef = useRef<{ backend: "s3" | "telegram"; fileId: string; uploadId?: string; key?: string } | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
   const currentFileNameRef = useRef<string>("");
+  const hasAttemptedAutoResume = useRef(false);
 
   useEffect(() => {
     if (!toast) return;
@@ -267,7 +272,7 @@ export default function FileUpload() {
   });
 
   // -- Multipart upload --
-  async function multipartUpload(file: File, hash: string, onProgress: (pct: number) => void) {
+  async function multipartUpload(file: File, hash: string, onProgress: (pct: number) => void, onFileId?: (fileId: string) => void) {
     const initRes = await fetch("/api/files/upload/multipart/init", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filename: file.name, mimeType: file.type, size: file.size, folderId: currentFolderId, hash }),
@@ -277,6 +282,7 @@ export default function FileUpload() {
     if (!initRes.ok) throw await parseError(initRes, "Failed to initialise multipart upload");
     const { uploadId, key, totalParts, fileId } = await initRes.json();
     currentFileIdRef.current = fileId;
+    onFileId?.(fileId);
     currentUploadRef.current = { backend: "s3", fileId, uploadId, key };
 
     const controller = new AbortController();
@@ -386,7 +392,7 @@ export default function FileUpload() {
     return completeRes.json();
   }
 
-  async function telegramUpload(file: File, hash: string, onProgress: (pct: number) => void) {
+  async function telegramUpload(file: File, hash: string, onProgress: (pct: number) => void, onFileId?: (fileId: string) => void) {
     const totalChunks = Math.ceil(file.size / TELEGRAM_CHUNK_SIZE);
 
     const initRes = await fetch("/api/files/telegram/init", {
@@ -404,6 +410,7 @@ export default function FileUpload() {
     }
     const { fileId } = await initRes.json();
     currentFileIdRef.current = fileId;
+    onFileId?.(fileId);
     currentUploadRef.current = { backend: "telegram", fileId };
 
     const resumeRes = await fetch(`/api/files/telegram/${fileId}/resume`);
@@ -528,13 +535,13 @@ export default function FileUpload() {
     return completeRes.json();
   }
 
-  async function uploadSmart(file: File, hash: string, onProgress: (pct: number) => void) {
+  async function uploadSmart(file: File, hash: string, onProgress: (pct: number) => void, onFileId?: (fileId: string) => void) {
     if (storageType === "telegram") {
-      return telegramUpload(file, hash, onProgress);
+      return telegramUpload(file, hash, onProgress, onFileId);
     }
     return file.size < SMALL_FILE_LIMIT
       ? smallUploadMutation.mutateAsync({ file, hash })
-      : multipartUpload(file, hash, onProgress);
+      : multipartUpload(file, hash, onProgress, onFileId);
   }
 
   const getFileUrl = async (key: string): Promise<string> => {
@@ -760,6 +767,8 @@ export default function FileUpload() {
     setStatus("idle");
     setProgress(0);
     if (meta?.fileId) {
+      resumeFileMap.delete(meta.fileId);
+      removeFile(meta.fileId).catch(() => {});
       queryClient.setQueryData<{
         files: FileType[];
         folders: FolderType[];
@@ -815,7 +824,7 @@ export default function FileUpload() {
     setToast({ msg: "Upload paused. You can resume later.", type: "warn" });
   };
 
-  const handleFile = async (file: File) => {
+  const handleFile = async (file: File, handle?: FileSystemFileHandle) => {
     setStatus("uploading"); setProgress(0);
     currentFileNameRef.current = file.name;
     setErrorMsg(""); setDuplicateFile(null);
@@ -824,17 +833,38 @@ export default function FileUpload() {
     if (file.size < SMALL_FILE_LIMIT) {
       intervalRef.current = setInterval(() => setProgress((p) => (p < 85 ? p + 8 : p)), 150);
     }
+
+    let capturedFileId: string | null = null
+    const onFileId = (fileId: string) => {
+      capturedFileId = fileId
+      if (handle) {
+        resumeFileMap.set(fileId, handle)
+        storeFile({
+          fileId,
+          handle,
+          filename: file.name,
+          size: file.size,
+          lastModified: file.lastModified,
+          storedAt: Date.now(),
+        }).catch(() => {})
+      }
+    }
+
     try {
       const hash = await getFileHash(file);
       await uploadSmart(file, hash, (pct) => {
         if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
         setProgress(pct);
-      });
+      }, onFileId);
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (!cancelRef.current) {
         setProgress(100); setStatus("success");
         setToast({ msg: `"${file.name}" uploaded successfully!`, type: "success" });
         setTimeout(() => setStatus("idle"), 3000);
+      }
+      if (capturedFileId && handle) {
+        resumeFileMap.delete(capturedFileId)
+        removeFile(capturedFileId).catch(() => {})
       }
     } catch (err: unknown) {
       const uploadError = err as UploadError;
@@ -850,11 +880,22 @@ export default function FileUpload() {
     }
   };
 
-  const handleResume = async (pendingFile: FileType, file: File) => {
+  const handleResume = async (pendingFile: FileType, file: File, handle?: FileSystemFileHandle) => {
     setResumingId(pendingFile._id);
     setStatus("uploading");
     setProgress(0);
     currentFileNameRef.current = file.name;
+    if (handle) {
+      resumeFileMap.set(pendingFile._id, handle)
+      storeFile({
+        fileId: pendingFile._id,
+        handle,
+        filename: file.name,
+        size: file.size,
+        lastModified: file.lastModified,
+        storedAt: Date.now(),
+      }).catch(() => {})
+    }
     cancelRef.current = false;
     pauseRef.current = false;
     try {
@@ -868,13 +909,18 @@ export default function FileUpload() {
       });
       setProgress(100);
       setStatus("success");
+      resumeFileMap.delete(pendingFile._id);
+      removeFile(pendingFile._id).catch(() => {});
       setToast({ msg: `"${file.name}" upload resumed and completed!`, type: "success" });
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       setTimeout(() => setStatus("idle"), 3000);
     } catch (err: unknown) {
       const uploadError = err as UploadError;
-      if (uploadError?.isCancelled) return;
+      if (uploadError?.isCancelled) {
+        resumeFileMap.delete(pendingFile._id);
+        removeFile(pendingFile._id).catch(() => {});
+        return;
+      }
       setStatus("error");
       setErrorMsg(uploadError?.message || "Resume failed");
       setToast({ msg: uploadError?.message || "Resume failed.", type: "error" });
@@ -882,6 +928,51 @@ export default function FileUpload() {
       setResumingId(null);
     }
   };
+
+  // -- Auto-resume on page refresh --
+  useEffect(() => {
+    if (hasAttemptedAutoResume.current) return
+    if (!pendingFiles.length) return
+    hasAttemptedAutoResume.current = true
+    pendingFiles.forEach(async (pf) => {
+      try {
+        const record = await getFile(pf._id)
+        if (!record) return
+        resumeFileMap.set(pf._id, record.handle)
+        const opts = { mode: "read" as const }
+        let permission = await record.handle.queryPermission(opts)
+        if (permission !== "granted") {
+          permission = await record.handle.requestPermission(opts)
+        }
+        if (permission !== "granted") return
+        const file = await record.handle.getFile()
+        const hash = await getFileHash(file)
+        if (pf.hash && hash !== pf.hash) {
+          removeFile(pf._id).catch(() => {})
+          resumeFileMap.delete(pf._id)
+          return
+        }
+        handleResume(pf, file, record.handle)
+      } catch {
+        removeFile(pf._id).catch(() => {})
+        resumeFileMap.delete(pf._id)
+      }
+    })
+  }, [pendingFiles])
+
+  const handlePickFile = async () => {
+    if (typeof showOpenFilePicker === 'function') {
+      try {
+        const [fileHandle] = await showOpenFilePicker()
+        const file = await fileHandle.getFile()
+        handleFile(file, fileHandle)
+        return
+      } catch {
+        // user cancelled or API error, fall through to hidden input
+      }
+    }
+    inputRef.current?.click()
+  }
 
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault(); setDragging(false);
@@ -1014,7 +1105,7 @@ export default function FileUpload() {
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
-            onClick={() => inputRef.current?.click()}
+            onClick={handlePickFile}
           >
             <input ref={inputRef} type="file" hidden onChange={onInputChange} />
             <div className="fu-dropzone-icon"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></div>
@@ -1055,13 +1146,49 @@ export default function FileUpload() {
                       className="fu-pending-btn resume"
                       disabled={resumingId === pf._id}
                       onClick={async () => {
-                        const fileInput = document.createElement("input");
-                        fileInput.type = "file";
-                        fileInput.onchange = async () => {
-                          const f = fileInput.files?.[0];
-                          if (f) await handleResume(pf, f);
-                        };
-                        fileInput.click();
+                        const cachedHandle = resumeFileMap.get(pf._id);
+                        if (cachedHandle) {
+                          try {
+                            const opts = { mode: "read" as const }
+                            if (await cachedHandle.queryPermission(opts) !== "granted") {
+                              await cachedHandle.requestPermission(opts)
+                            }
+                            const file = await cachedHandle.getFile()
+                            await handleResume(pf, file, cachedHandle)
+                          } catch {
+                            setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" })
+                          }
+                          return;
+                        }
+                        const fromDB = await getFile(pf._id);
+                        if (fromDB) {
+                          resumeFileMap.set(pf._id, fromDB.handle)
+                          try {
+                            const opts = { mode: "read" as const }
+                            if (await fromDB.handle.queryPermission(opts) !== "granted") {
+                              await fromDB.handle.requestPermission(opts)
+                            }
+                            const file = await fromDB.handle.getFile()
+                            await handleResume(pf, file, fromDB.handle)
+                          } catch {
+                            setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" })
+                          }
+                          return;
+                        }
+                        try {
+                          const [fileHandle] = await showOpenFilePicker()
+                          const file = await fileHandle.getFile()
+                          resumeFileMap.set(pf._id, fileHandle)
+                          await handleResume(pf, file, fileHandle)
+                        } catch {
+                          const fileInput = document.createElement("input");
+                          fileInput.type = "file";
+                          fileInput.onchange = async () => {
+                            const f = fileInput.files?.[0];
+                            if (f) await handleResume(pf, f);
+                          };
+                          fileInput.click();
+                        }
                       }}
                     >
                       {resumingId === pf._id ? "Resuming..." : "Resume"}
