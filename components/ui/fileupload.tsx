@@ -835,9 +835,26 @@ export default function FileUpload() {
     }
 
     let capturedFileId: string | null = null
+    let tempId: string | null = null
+    if (handle) {
+      tempId = `__temp_${Date.now()}`
+      resumeFileMap.set(tempId, handle)
+      storeFile(tempId, {
+        fileId: tempId,
+        handle,
+        filename: file.name,
+        size: file.size,
+        lastModified: file.lastModified,
+        storedAt: Date.now(),
+      }).catch(() => {})
+    }
     const onFileId = (fileId: string) => {
       capturedFileId = fileId
       if (handle) {
+        if (tempId) {
+          resumeFileMap.delete(tempId)
+          removeFile(tempId).catch(() => {})
+        }
         resumeFileMap.set(fileId, handle)
         storeFile(fileId, {
           fileId,
@@ -865,11 +882,20 @@ export default function FileUpload() {
       if (capturedFileId && handle) {
         resumeFileMap.delete(capturedFileId)
         removeFile(capturedFileId).catch(() => {})
+      } else if (tempId) {
+        resumeFileMap.delete(tempId)
+        removeFile(tempId).catch(() => {})
       }
     } catch (err: unknown) {
       const uploadError = err as UploadError;
       if (intervalRef.current) clearInterval(intervalRef.current);
-      if (uploadError?.isCancelled) return;
+      if (uploadError?.isCancelled) {
+        if (tempId) {
+          resumeFileMap.delete(tempId)
+          removeFile(tempId).catch(() => {})
+        }
+        return;
+      }
       if (uploadError?.isDuplicate) {
         setStatus("duplicate"); setDuplicateFile(uploadError.existingFile ?? null);
         setToast({ msg: "This file already exists in your storage.", type: "warn" });
