@@ -159,7 +159,7 @@ export default function ResumePage() {
 
     if (handle) {
       resumeFileMap.set(pf._id, handle);
-      storeFile({
+      storeFile(pf._id, {
         fileId: pf._id,
         handle,
         filename: file.name,

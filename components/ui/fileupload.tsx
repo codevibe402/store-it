@@ -839,7 +839,7 @@ export default function FileUpload() {
       capturedFileId = fileId
       if (handle) {
         resumeFileMap.set(fileId, handle)
-        storeFile({
+        storeFile(fileId, {
           fileId,
           handle,
           filename: file.name,
@@ -887,7 +887,7 @@ export default function FileUpload() {
     currentFileNameRef.current = file.name;
     if (handle) {
       resumeFileMap.set(pendingFile._id, handle)
-      storeFile({
+      storeFile(pendingFile._id, {
         fileId: pendingFile._id,
         handle,
         filename: file.name,

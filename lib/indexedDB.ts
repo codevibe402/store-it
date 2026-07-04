@@ -20,7 +20,7 @@ function openDB(): Promise<IDBDatabase> {
     request.onupgradeneeded = () => {
       const db = request.result
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: "fileId" })
+        db.createObjectStore(STORE_NAME)
       }
     }
     request.onsuccess = () => {
@@ -57,11 +57,11 @@ async function cleanupOldRecords(db: IDBDatabase): Promise<void> {
   })
 }
 
-export async function storeFile(record: UploadRecord): Promise<void> {
+export async function storeFile(key: string, record: UploadRecord): Promise<void> {
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite")
-    tx.objectStore(STORE_NAME).put(record, record.fileId)
+    tx.objectStore(STORE_NAME).put(record, key)
     tx.oncomplete = () => { db.close(); resolve() }
     tx.onerror = () => { db.close(); reject(tx.error) }
   })
