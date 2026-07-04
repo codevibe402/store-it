@@ -48,14 +48,6 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-async function getFileHash(file: File): Promise<string> {
-  const buffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 export default function ResumePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -140,6 +132,23 @@ export default function ResumePage() {
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   }, [queryClient, resumeFileMap]);
 
+  const handlePause = useCallback(async (pf: FileType) => {
+    pauseRef.current = true;
+    cancelRef.current = false;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    try {
+      await fetch("/api/files/telegram/pause", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId: pf._id }),
+      });
+    } catch {}
+    queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+  }, [queryClient]);
+
   const handleResume = useCallback(async (pf: FileType, file: File, handle?: FileSystemFileHandle) => {
     setResumingId(pf._id);
     setResumeProgress((prev) => ({ ...prev, [pf._id]: 0 }));
@@ -161,11 +170,6 @@ export default function ResumePage() {
     }
 
     try {
-      const hash = await getFileHash(file);
-      if (pf.hash && hash !== pf.hash) {
-        throw new Error("Selected file does not match the original. Hash mismatch.");
-      }
-
       const resumeRes = await fetch(`/api/files/telegram/${pf._id}/resume`);
       const resumeData = resumeRes.ok ? await resumeRes.json() : null;
       const alreadyUploaded = new Set<number>(resumeData?.uploadedIndexes ?? []);
@@ -267,8 +271,10 @@ export default function ResumePage() {
     } catch (err: unknown) {
       const uploadError = err as Error & { isCancelled?: boolean };
       if (uploadError?.isCancelled) {
-        resumeFileMap.delete(pf._id);
-        removeFile(pf._id).catch(() => {});
+        if (!pauseRef.current) {
+          resumeFileMap.delete(pf._id);
+          removeFile(pf._id).catch(() => {});
+        }
         setResumingId(null);
         return;
       }
@@ -396,6 +402,8 @@ export default function ResumePage() {
         .rp-btn:hover { background: var(--surface3); border-color: var(--border-light); color: var(--text); }
         .rp-btn.resume { color: var(--accent); border-color: rgba(108,142,255,0.25); }
         .rp-btn.resume:hover { background: rgba(108,142,255,0.1); }
+        .rp-btn.pause { color: #fbbf24; border-color: rgba(251,191,36,0.25); }
+        .rp-btn.pause:hover { background: rgba(251,191,36,0.1); }
         .rp-btn.cancel { color: var(--error); border-color: rgba(248,113,113,0.25); }
         .rp-btn.cancel:hover { background: rgba(248,113,113,0.1); }
         .rp-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -482,7 +490,14 @@ export default function ResumePage() {
                         </div>
                       </div>
                       <div className="rp-card-actions">
-                        {!active && (
+                        {active ? (
+                          <button
+                            className="rp-btn pause"
+                            onClick={() => handlePause(pf)}
+                          >
+                            Pause
+                          </button>
+                        ) : (
                           <button
                             className="rp-btn resume"
                             onClick={() => onResumeClick(pf)}
@@ -495,7 +510,7 @@ export default function ResumePage() {
                           disabled={active}
                           onClick={() => handleCancel(pf)}
                         >
-                          {active ? "..." : "Cancel"}
+                          Cancel
                         </button>
                       </div>
                     </div>
