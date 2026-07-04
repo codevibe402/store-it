@@ -61,7 +61,7 @@ export async function storeFile(record: UploadRecord): Promise<void> {
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite")
-    tx.objectStore(STORE_NAME).put(record)
+    tx.objectStore(STORE_NAME).put(record, record.fileId)
     tx.oncomplete = () => { db.close(); resolve() }
     tx.onerror = () => { db.close(); reject(tx.error) }
   })
