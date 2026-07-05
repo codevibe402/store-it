@@ -198,6 +198,7 @@ export default function FileUpload() {
   const [resumingId, setResumingId] = useState<string | null>(null);
   const [showPending, setShowPending] = useState(false);
   const pausedFileRef = useRef<{ fileId: string; filename: string } | null>(null);
+  const cancelledIds = useRef(new Set<string>());
   const currentFileNameRef = useRef<string>("");
   const hasAttemptedAutoResume = useRef(false);
 
@@ -238,6 +239,7 @@ export default function FileUpload() {
   const files = dashboard?.files ?? [];
   const folders = dashboard?.folders ?? [];
   const pendingFiles = dashboard?.pendingFiles ?? [];
+  const visiblePendingFiles = pendingFiles.filter((f) => !cancelledIds.current.has(f._id));
   const filesLoading = dashboardLoading;
   const foldersLoading = dashboardLoading;
   const pendingLoading = dashboardLoading;
@@ -769,16 +771,9 @@ export default function FileUpload() {
     setStatus("idle");
     setProgress(0);
     if (meta?.fileId) {
+      cancelledIds.current.add(meta.fileId);
       resumeFileMap.delete(meta.fileId);
       removeFile(meta.fileId).catch(() => {});
-      queryClient.setQueryData<{
-        files: FileType[];
-        folders: FolderType[];
-        pendingFiles: FileType[];
-      }>(["dashboard"], (old) => old ? {
-        ...old,
-        pendingFiles: old.pendingFiles.filter((file) => file._id !== meta.fileId),
-      } : old);
     }
     setToast({ msg: "Upload cancelled.", type: "warn" });
 
@@ -1144,7 +1139,7 @@ export default function FileUpload() {
           </div>
 
           {/* Active Uploads */}
-          {(status === "uploading" || status === "paused" || (!showPending && pendingFiles.length > 0)) && (
+          {(status === "uploading" || status === "paused" || (!showPending && visiblePendingFiles.length > 0)) && (
             <div>
               {(status === "uploading" || status === "paused") && (
                 <div className="fu-section-header">
@@ -1225,7 +1220,7 @@ export default function FileUpload() {
                             }}>Resume</button>
                             <button className="fu-pending-btn cancel" onClick={() => {
                               pausedFileRef.current = null
-                              queryClient.setQueryData<{ files: FileType[]; folders: FolderType[]; pendingFiles: FileType[] }>(["dashboard"], (old) => old ? { ...old, pendingFiles: old.pendingFiles.filter((f) => f._id !== pf._id) } : old)
+                              cancelledIds.current.add(pf._id)
                               setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" })
                               fetch("/api/files/telegram/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId: pf._id }) }).then(() => queryClient.invalidateQueries({ queryKey: ["dashboard"] })).catch(() => {})
                               setStatus("idle")
@@ -1241,18 +1236,18 @@ export default function FileUpload() {
           )}
 
           {/* Pending Uploads Toggle */}
-          {pendingFiles.length > 0 && (
+          {visiblePendingFiles.length > 0 && (
             <div style={{ marginTop: 8 }}>
               <button
                 className="fu-action-btn"
                 onClick={() => setShowPending(!showPending)}
                 style={{ width: "100%", textAlign: "center", justifyContent: "center" }}
               >
-                {showPending ? `Hide pending uploads` : `Show pending uploads (${pendingFiles.length})`}
+                {showPending ? `Hide pending uploads` : `Show pending uploads (${visiblePendingFiles.length})`}
               </button>
               {showPending && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-                  {pendingFiles.map((pf) => (
+                  {visiblePendingFiles.map((pf) => (
                     <div key={pf._id} className="fu-pending-row" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
                       <span className="fu-pending-name">{pf.filename}</span>
                       <span className="fu-pending-meta">{formatBytes(pf.size)}</span>
@@ -1302,7 +1297,7 @@ export default function FileUpload() {
                         }
                       }}>{resumingId === pf._id ? "Resuming..." : "Resume"}</button>
                       <button className="fu-pending-btn cancel" onClick={() => {
-                        queryClient.setQueryData<{ files: FileType[]; folders: FolderType[]; pendingFiles: FileType[] }>(["dashboard"], (old) => old ? { ...old, pendingFiles: old.pendingFiles.filter((f) => f._id !== pf._id) } : old)
+                        cancelledIds.current.add(pf._id)
                         setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" })
                         fetch("/api/files/telegram/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId: pf._id }) }).then(() => queryClient.invalidateQueries({ queryKey: ["dashboard"] })).catch(() => {})
                       }}>Cancel</button>
