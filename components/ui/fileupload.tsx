@@ -1329,31 +1329,31 @@ export default function FileUpload() {
                           className="fixed z-[1000] min-w-[170px] rounded-[12px] border border-[var(--border,#252a38)] bg-[var(--surface2,#1a1e28)] p-[5px] shadow-[0_8px_32px_rgba(0,0,0,0.4)]"
                           style={{ left: menuPos.left, top: menuPos.top }}
                         >
-                          <button className="fu-ctx-item"
+                          <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]"
                             onClick={async () => { await openFile(file); setOpenMenuId(null); setMenuPos(null); }}>
                             Open
                           </button>
-                          <button className="fu-ctx-item"
+                          <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]"
                             onClick={() => { openShareModal(file); setOpenMenuId(null); setMenuPos(null); }}>
                             Share
                           </button>
-                          <button className="fu-ctx-item"
+                          <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]"
                             onClick={() => { openVersions(file); setOpenMenuId(null); setMenuPos(null); }}>
                             Version history
                           </button>
-                          <button className="fu-ctx-item"
+                          <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]"
                             onClick={() => { downloadFile(file); setOpenMenuId(null); setMenuPos(null); }}>
                       Download
                           </button>
-                          <button className="fu-ctx-item"
+                          <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]"
                             onClick={() => { setMoveTarget(file); setOpenMenuId(null); setMenuPos(null); }}>
                             Move to folder
                           </button>
-                          <div className="fu-ctx-sep" />
-                          <button className="fu-ctx-item danger"
-                            onClick={() => { setDeleteTarget({ type: "file", item: file }); setOpenMenuId(null); setMenuPos(null); }}>
-                            Delete
-                          </button>
+                          <div className="h-px bg-[var(--border,#252a38)] my-1" />
+                          <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)] hover:text-[var(--error,#f87171)] hover:bg-[rgba(248,113,113,0.08)]"
+                             onClick={() => { setDeleteTarget({ type: "file", item: file }); setOpenMenuId(null); setMenuPos(null); }}>
+                             Delete
+                           </button>
                         </div>
                       )}
                     </div>
@@ -1386,22 +1386,22 @@ export default function FileUpload() {
         <div className="fixed z-[1000] min-w-[170px] animate-[ctxIn_0.12s_ease] rounded-[12px] border border-[var(--border,#252a38)] bg-[var(--surface2,#1a1e28)] p-[6px] shadow-[0_12px_40px_rgba(0,0,0,0.5)]" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
           {ctxMenu.itemType === "file" ? (
             <>
-              <button className="fu-ctx-item" onClick={async () => { await openFile(ctxMenu.item as FileType); setCtxMenu(null); }}>Open</button>
-              <button className="fu-ctx-item" onClick={() => { openShareModal(ctxMenu.item as FileType); setCtxMenu(null); }}>Share</button>
-              <button className="fu-ctx-item" onClick={() => { downloadFile(ctxMenu.item as FileType); setCtxMenu(null); }}>Download</button>
-              <button className="fu-ctx-item" onClick={() => { setMoveTarget(ctxMenu.item as FileType); setCtxMenu(null); }}>Move to folder</button>
-              <div className="fu-ctx-sep" />
-              <button className="fu-ctx-item danger" onClick={() => { setDeleteTarget({ type: "file", item: ctxMenu.item as FileType }); setCtxMenu(null); }}>Delete</button>
+              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={async () => { await openFile(ctxMenu.item as FileType); setCtxMenu(null); }}>Open</button>
+              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { openShareModal(ctxMenu.item as FileType); setCtxMenu(null); }}>Share</button>
+              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { downloadFile(ctxMenu.item as FileType); setCtxMenu(null); }}>Download</button>
+              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { setMoveTarget(ctxMenu.item as FileType); setCtxMenu(null); }}>Move to folder</button>
+              <div className="h-px bg-[var(--border,#252a38)] my-1" />
+              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)] hover:text-[var(--error,#f87171)] hover:bg-[rgba(248,113,113,0.08)]" onClick={() => { setDeleteTarget({ type: "file", item: ctxMenu.item as FileType }); setCtxMenu(null); }}>Delete</button>
             </>
           ) : (
             <>
-              <button className="fu-ctx-item" onClick={() => { setCurrentFolderId((ctxMenu.item as FolderType)._id); setCtxMenu(null); }}>Open folder</button>
-              <button className="fu-ctx-item" onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "read"); setCtxMenu(null); }}>Share read link</button>
-              <button className="fu-ctx-item" onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "add"); setCtxMenu(null); }}>Share write link</button>
-              <button className="fu-ctx-item" onClick={() => { setMoveFolderTarget(ctxMenu.item as FolderType); setCtxMenu(null); }}>Move folder</button>
-              <button className="fu-ctx-item" onClick={() => { downloadFolder(ctxMenu.item as FolderType); setCtxMenu(null); }}>Download as ZIP</button>
-              <div className="fu-ctx-sep" />
-              <button className="fu-ctx-item danger" onClick={() => { setDeleteTarget({ type: "folder", item: ctxMenu.item as FolderType }); setCtxMenu(null); }}>Delete folder</button>
+              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { setCurrentFolderId((ctxMenu.item as FolderType)._id); setCtxMenu(null); }}>Open folder</button>
+              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "read"); setCtxMenu(null); }}>Share read link</button>
+              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "add"); setCtxMenu(null); }}>Share write link</button>
+              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { setMoveFolderTarget(ctxMenu.item as FolderType); setCtxMenu(null); }}>Move folder</button>
+              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { downloadFolder(ctxMenu.item as FolderType); setCtxMenu(null); }}>Download as ZIP</button>
+              <div className="h-px bg-[var(--border,#252a38)] my-1" />
+              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)] hover:text-[var(--error,#f87171)] hover:bg-[rgba(248,113,113,0.08)]" onClick={() => { setDeleteTarget({ type: "folder", item: ctxMenu.item as FolderType }); setCtxMenu(null); }}>Delete folder</button>
             </>
           )}
         </div>
