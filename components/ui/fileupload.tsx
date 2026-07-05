@@ -925,9 +925,8 @@ export default function FileUpload() {
   return (
     <>
 
-      {showSearch && <FileSearch onClose={() => setShowSearch(false)} />}
-
       <div className="fu-root">
+        {showSearch && <FileSearch onClose={() => setShowSearch(false)} />}
 
         {/* -- Top nav -- */}
         <div className="fu-topbar">
