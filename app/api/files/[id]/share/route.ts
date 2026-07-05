@@ -1,6 +1,6 @@
-// app/api/files/[id]/share/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
+import crypto from "crypto";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getAuthUser } from "@/server/auth/auth";
@@ -9,12 +9,9 @@ import { s3, BUCKET } from "@/adapters/storage/s3";
 import File from "@/adapters/database/models/File";
 import FileShare from "@/adapters/database/models/Fileshare";
 
-// Share links are valid for 7 days. Re-calling POST within this window returns
-// the same link rather than minting a new one — preventing link sprawl.
 const SHARE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const SHARE_TTL_MS      = SHARE_TTL_SECONDS * 1000;
 
-// ── Auth helper ───────────────────────────────────────────────────────────────
 async function getUserId(): Promise<string> {
   const user = await getAuthUser();
   if (!user?.userId) {
@@ -25,18 +22,10 @@ async function getUserId(): Promise<string> {
   return user.userId;
 }
 
-// ── POST /api/files/:id/share ─────────────────────────────────────────────────
-// Creates a presigned S3 URL that anyone can use to view/download the file.
-// Idempotent — returns the existing share if still valid (> 30 min remaining).
-//
-// Strategy:
-// - Uses S3 presigned URLs with 7-day expiration
-// - CloudFront automatically caches the presigned URL for its lifetime
-// - When the presigned URL expires, CloudFront stops serving it
-// - No extra setup needed—expiration is built into the presigned URL
-//
-// Note: This endpoint is for shared access (anyone with the URL can access).
-// For regular user downloads, see GET /api/files/:id/download (CloudFront cached)
+function generateToken(): string {
+  return crypto.randomBytes(32).toString("hex");
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -46,8 +35,6 @@ export async function POST(
 
     const { id } = await params;
 
-    
-
     if (!ObjectId.isValid(id)) {
       return NextResponse.json({ error: "Invalid file id" }, { status: 400 });
     }
@@ -55,7 +42,6 @@ export async function POST(
     await connectDB();
     const now = new Date();
 
-    // ── 1. Verify file ownership ───────────────────────────────────────────
     const file = await File.findOne({
       _id:      id,
       owner_id: userId,
@@ -66,7 +52,6 @@ export async function POST(
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
-    // ── 2. Return existing share if still valid (> 30 min remaining) ───────
     const minRemaining = new Date(now.getTime() + 30 * 60 * 1000);
 
     const existingShare = await FileShare.findOne({
@@ -83,28 +68,49 @@ export async function POST(
       });
     }
 
-    // ── 3. Mint a fresh presigned URL ──────────────────────────────────────
+    const isTelegram = file.backend === "telegram";
+    let shareUrl: string;
+
+    if (isTelegram) {
+      const token = generateToken();
+      const base  = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+      shareUrl = `${base}/api/share/file/${token}`;
+
+      const expiresAt = new Date(now.getTime() + SHARE_TTL_MS);
+
+      await FileShare.create({
+        fileId:     id,
+        filename:   file.filename,
+        owner_id:   userId,
+        shareUrl,
+        shareToken: token,
+        backend:    "telegram",
+        expiresAt,
+      });
+
+      return NextResponse.json({ shareUrl, expiresAt, reused: false });
+    }
+
     const command = new GetObjectCommand({
       Bucket: BUCKET,
       Key:    file.storageUrl,
-      // Inline so the link opens in the browser rather than forcing download
       ResponseContentDisposition: `inline; filename="${encodeURIComponent(file.filename)}"`,
       ResponseContentType: file.mimetype,
     });
 
-    const shareUrl = await getSignedUrl(s3, command, {   // ← was s3Client
+    shareUrl = await getSignedUrl(s3, command, {
       expiresIn: SHARE_TTL_SECONDS,
     });
 
     const expiresAt = new Date(now.getTime() + SHARE_TTL_MS);
 
-    // ── 4. Persist the share record ────────────────────────────────────────
-    // TTL index lives on the FileShare schema — not recreated here each call
     await FileShare.create({
-      fileId:   id,
-      filename: file.filename,
-      owner_id: userId,
+      fileId:     id,
+      filename:   file.filename,
+      owner_id:   userId,
       shareUrl,
+      shareToken: generateToken(),
+      backend:    "s3",
       expiresAt,
     });
 
@@ -118,10 +124,6 @@ export async function POST(
   }
 }
 
-// ── DELETE /api/files/:id/share ───────────────────────────────────────────────
-// Revokes all active share links for this file (removes them from the DB).
-// Note: previously distributed S3 presigned URLs remain valid until their own
-// TTL expires — shorten SHARE_TTL_SECONDS above if near-instant revocation matters.
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -130,8 +132,6 @@ export async function DELETE(
     const userId = await getUserId();
 
     const { id } = await params;
-
-    
 
     if (!ObjectId.isValid(id)) {
       return NextResponse.json({ error: "Invalid file id" }, { status: 400 });
@@ -153,4 +153,3 @@ export async function DELETE(
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
-
