@@ -1,39 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/server/auth/auth";
-import connectDB from "@/adapters/database/mongoose";
-import File from "@/adapters/database/models/File";
-import User from "@/adapters/database/models/User";
+import { confirmFile } from "@/server/services/fileService";
+import { ServiceError } from "@/server/services/shareService";
 
 export async function POST(req: NextRequest) {
-  const user = await getAuthUser();
-  if (!user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  try {
+    const user = await getAuthUser();
+    if (!user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await req.json();
-  const { fileId } = body as { fileId: string };
+    const body = await req.json();
+    const { fileId } = body as { fileId: string };
 
-  if (!fileId) {
-    return NextResponse.json({ error: "fileId is required" }, { status: 400 });
-  }
-
-  await connectDB();
-
-  const file = await File.findById(fileId);
-  if (!file) {
-    return NextResponse.json({ error: "File not found" }, { status: 404 });
-  }
-
-  // Prevent double-counting if confirm is called more than once
-  if (file.status === "uploaded") {
+    const file = await confirmFile(fileId);
     return NextResponse.json({ file }, { status: 200 });
+  } catch (err) {
+    if (err instanceof ServiceError) return NextResponse.json({ error: err.message }, { status: err.status });
+    console.error("[POST /api/files/confirm]", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
-
-  file.status = "uploaded";
-  await file.save();
-
-  // Increment user's storage usage
-  await User.findByIdAndUpdate(file.owner_id, { $inc: { storageused: file.size } });
-
-  return NextResponse.json({ file }, { status: 200 });
 }
