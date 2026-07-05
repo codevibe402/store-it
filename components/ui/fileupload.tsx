@@ -134,6 +134,7 @@ export default function FileUpload() {
   const { status: sessionStatus } = useSession();
   const isAuthenticated = sessionStatus === "authenticated";
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   // Upload state
   const [dragging, setDragging] = useState(false);
   const [status, setStatus] = useState<UploadStatus>("idle");
@@ -192,7 +193,7 @@ export default function FileUpload() {
     return () => window.removeEventListener("click", close);
   }, [ctxMenu]);
   useEffect(() => {
-    const close = () => setOpenMenuId(null);
+    const close = () => { setOpenMenuId(null); setMenuPos(null); };
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, []);
@@ -907,7 +908,15 @@ export default function FileUpload() {
 
   const openCtx = (e: React.MouseEvent, item: FileType | FolderType, itemType: "file" | "folder") => {
     e.preventDefault(); e.stopPropagation();
-    setCtxMenu({ x: e.clientX, y: e.clientY, item, itemType });
+    const menuWidth = 170;
+    const menuHeight = 260;
+    let left = e.clientX;
+    let top = e.clientY;
+    if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - 8 - menuWidth;
+    if (top + menuHeight > window.innerHeight - 8) top = window.innerHeight - 8 - menuHeight;
+    if (left < 8) left = 8;
+    if (top < 8) top = 8;
+    setCtxMenu({ x: left, y: top, item, itemType });
   };
 
   const currentFolder = folders.find((f) => f._id === currentFolderId);
@@ -1293,41 +1302,59 @@ export default function FileUpload() {
                       <button
                         className="fu-icon-btn"
                         style={openMenuId === file._id ? { borderColor: "var(--border-hover)", color: "var(--text)" } : {}}
-                        onClick={() => setOpenMenuId(openMenuId === file._id ? null : file._id)}
+                        onClick={(e) => {
+                          if (openMenuId === file._id) {
+                            setOpenMenuId(null);
+                            setMenuPos(null);
+                          } else {
+                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                            const menuWidth = 170;
+                            let left = rect.right - menuWidth;
+                            if (left < 8) left = 8;
+                            const menuHeight = 260;
+                            let top = rect.bottom + 6;
+                            if (top + menuHeight > window.innerHeight) {
+                              top = rect.top - 6 - menuHeight;
+                              if (top < 8) top = 8;
+                            }
+                            setMenuPos({ top, left });
+                            setOpenMenuId(file._id);
+                          }
+                        }}
                       >
                         ...
                       </button>
 
-                      {openMenuId === file._id && (
+                      {openMenuId === file._id && menuPos && (
                         <div style={{
-                          position: "absolute", right: 0, top: "calc(100% + 6px)",
+                          position: "fixed", left: menuPos.left, top: menuPos.top,
                           background: "var(--surface2)", border: "1px solid var(--border)",
                           borderRadius: "12px", padding: "5px", minWidth: "170px",
-                          zIndex: 200, boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+                          zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
                         }}>
                           <button className="fu-ctx-item"
-                            onClick={async () => { await openFile(file); setOpenMenuId(null); }}>
+                            onClick={async () => { await openFile(file); setOpenMenuId(null); setMenuPos(null); }}>
                             Open
                           </button>
                           <button className="fu-ctx-item"
-                            onClick={() => { openShareModal(file); setOpenMenuId(null); }}>
+                            onClick={() => { openShareModal(file); setOpenMenuId(null); setMenuPos(null); }}>
                             Share
                           </button>
                           <button className="fu-ctx-item"
-                            onClick={() => { openVersions(file); setOpenMenuId(null); }}>
+                            onClick={() => { openVersions(file); setOpenMenuId(null); setMenuPos(null); }}>
                             Version history
                           </button>
                           <button className="fu-ctx-item"
-                            onClick={() => { downloadFile(file); setOpenMenuId(null); }}>
-                    Download
+                            onClick={() => { downloadFile(file); setOpenMenuId(null); setMenuPos(null); }}>
+                      Download
                           </button>
                           <button className="fu-ctx-item"
-                            onClick={() => { setMoveTarget(file); setOpenMenuId(null); }}>
+                            onClick={() => { setMoveTarget(file); setOpenMenuId(null); setMenuPos(null); }}>
                             Move to folder
                           </button>
                           <div className="fu-ctx-sep" />
                           <button className="fu-ctx-item danger"
-                            onClick={() => { setDeleteTarget({ type: "file", item: file }); setOpenMenuId(null); }}>
+                            onClick={() => { setDeleteTarget({ type: "file", item: file }); setOpenMenuId(null); setMenuPos(null); }}>
                             Delete
                           </button>
                         </div>
