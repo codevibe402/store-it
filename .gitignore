@@ -61,3 +61,6 @@ next-env.d.ts
 
 # telegram bot api (external subproject)
 telegram-bot-api/
+
+# misc root files
+telegramcontext.ts
