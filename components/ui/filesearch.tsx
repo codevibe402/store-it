@@ -70,18 +70,8 @@ export default function FileSearch({ onClose }: { onClose: () => void }) {
     };
   }, [query]);
 
-  const openFile = async (file: SearchResult) => {
-    if (file.storageUrl) {
-      const urlRes = await fetch("/api/files/fetch/url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: file.storageUrl }),
-      });
-      if (urlRes.ok) {
-        const { url } = await urlRes.json();
-        window.open(url, "_blank");
-      }
-    }
+  const openFile = (file: SearchResult) => {
+    window.open(`/api/files/${file._id}/download?preview=1`, "_blank");
   };
 
   return (
