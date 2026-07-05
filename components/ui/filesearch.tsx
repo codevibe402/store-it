@@ -76,35 +76,47 @@ export default function FileSearch({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <div className="fs-overlay" onClick={onClose}>
-        <div className="fs-panel" onClick={(e) => e.stopPropagation()}>
-          <div className="fs-header">
+      <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-20" onClick={onClose}>
+        <div
+          className="flex w-[560px] max-w-[94vw] flex-col overflow-hidden rounded-2xl border border-[var(--border,#252a38)] bg-[var(--surface2,#1a1e28)] shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-2.5 border-b border-[var(--border,#252a38)] p-3.5">
             <input
               ref={inputRef}
-              className="fs-input"
+              className="flex-1 rounded-xl border border-[var(--border,#252a38)] bg-[var(--surface,#13161e)] px-3.5 py-2.5 text-sm text-[var(--text,#e8eaf0)] outline-none placeholder:text-[var(--text-muted,#6b7280)] focus:border-[var(--accent,#6c8eff)]"
               placeholder="Search files by name or content..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Escape" && onClose()}
             />
-            <button className="fs-close" onClick={onClose}>x</button>
+            <button
+              className="cursor-pointer rounded-lg border-none bg-none px-2 py-1 text-lg text-[var(--text-muted,#6b7280)] hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]"
+              onClick={onClose}
+            >x</button>
           </div>
-          <div className="fs-body">
+          <div className="flex-1 overflow-y-auto p-3">
             {query.trim().length < 2 ? (
-              <div className="fs-hint">Type at least 2 characters to search</div>
+              <div className="py-8 text-center text-sm text-[var(--text-muted,#6b7280)]">Type at least 2 characters to search</div>
             ) : loading ? (
-              <div className="fs-spinner">Searching...</div>
+              <div className="py-5 text-center text-sm text-[var(--text-muted,#6b7280)]">Searching...</div>
             ) : results.length === 0 ? (
-              <div className="fs-hint">No matches found</div>
+              <div className="py-8 text-center text-sm text-[var(--text-muted,#6b7280)]">No matches found</div>
             ) : (
               results.map((r) => (
-                <div key={r._id} className="fs-result" onClick={() => openFile(r)}>
-                  <div className="fs-result-icon">{getFileIcon(r.mimetype)}</div>
-                  <div className="fs-result-info">
-                    <div className="fs-result-name">{r.filename}</div>
-                    {r.snippet && <div className="fs-result-snippet">{r.snippet}</div>}
+                <div
+                  key={r._id}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2.5 transition-colors hover:bg-[var(--surface,#13161e)]"
+                  onClick={() => openFile(r)}
+                >
+                  <div className="shrink-0 text-lg">{getFileIcon(r.mimetype)}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-[var(--text,#e8eaf0)]">{r.filename}</div>
+                    {r.snippet && (
+                      <div className="mt-0.5 truncate text-xs text-[var(--text-muted,#6b7280)]">{r.snippet}</div>
+                    )}
                   </div>
-                  <div className="fs-result-meta">{formatBytes(r.size)}</div>
+                  <div className="shrink-0 text-xs text-[var(--text-muted,#6b7280)]">{formatBytes(r.size)}</div>
                 </div>
               ))
             )}
