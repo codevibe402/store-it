@@ -103,13 +103,19 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
       return NextResponse.json({ error: "Folder not found" }, { status: 404 });
     }
 
-    const containedFiles = await File.find({
+    const fileCount = await File.countDocuments({
       $or: [{ folderId: id }, { folders_id: id }],
       owner_id: userId,
       status: "uploaded",
-    }).lean();
+    });
 
-    if (deleteFiles && containedFiles.length > 0) {
+    if (deleteFiles && fileCount > 0) {
+      const containedFiles = await File.find({
+        $or: [{ folderId: id }, { folders_id: id }],
+        owner_id: userId,
+        status: "uploaded",
+      }).lean();
+
       const s3Keys = containedFiles.map((file) => ({ Key: file.storageUrl }));
 
       for (let i = 0; i < s3Keys.length; i += 1000) {
@@ -125,7 +131,7 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
         $or: [{ folderId: id }, { folders_id: id }],
         owner_id: userId,
       });
-    } else {
+    } else if (!deleteFiles) {
       await File.updateMany(
         { $or: [{ folderId: id }, { folders_id: id }], owner_id: userId },
         { $set: { folderId: null, folders_id: null } }
@@ -141,8 +147,8 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
 
     return NextResponse.json({
       success: true,
-      deletedFiles: deleteFiles ? containedFiles.length : 0,
-      movedToRoot: deleteFiles ? 0 : containedFiles.length,
+      deletedFiles: deleteFiles ? fileCount : 0,
+      movedToRoot: deleteFiles ? 0 : fileCount,
       movedFoldersToRoot: movedChildFolders.modifiedCount,
     });
   } catch (err: unknown) {
