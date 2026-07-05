@@ -38,6 +38,7 @@ coverage/
 # misc
 .DS_Store
 *.pem
+*.log
 
 # vercel
 .vercel
@@ -45,3 +46,18 @@ coverage/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# agent / tooling config
+.agents/
+
+# turbo / cache
+.turbo/
+
+# telegram bot api (external subproject)
+telegram-bot-api/
