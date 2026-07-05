@@ -228,6 +228,23 @@ export default function ResumePage() {
       }
     }
 
+    const identityKey = `${pf.filename}|${pf.size}`
+    const byIdentity = await getFile(identityKey)
+    if (byIdentity) {
+      resumeHandleCache.set(identityKey, byIdentity.handle)
+      try {
+        const opts = { mode: "read" as const };
+        if (await byIdentity.handle.queryPermission(opts) !== "granted") {
+          await byIdentity.handle.requestPermission(opts);
+        }
+        const file = await byIdentity.handle.getFile();
+        await handleResume(pf, file, byIdentity.handle);
+        return;
+      } catch {
+        resumeHandleCache.delete(identityKey);
+      }
+    }
+
     try {
       const [fileHandle] = await showOpenFilePicker();
       const file = await fileHandle.getFile();
