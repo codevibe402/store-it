@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/[...nextauth]";
-import connectDB from "@/lib/mongoose";
-import File from "@/models/File";
-import TelegramChunk from "@/models/TelegramChunk";
-import { deleteMessage } from "@/lib/telegram";
+import { getAuthUser } from "@/server/auth/auth";
+import connectDB from "@/adapters/database/mongoose";
+import File from "@/adapters/database/models/File";
+import TelegramChunk from "@/adapters/database/models/TelegramChunk";
+import { deleteMessage } from "@/adapters/storage/telegram";
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  const authUser = await getAuthUser();
+  if (!authUser?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -20,7 +19,7 @@ export async function POST(
 
   await connectDB();
 
-  const user = await (await import("@/models/User")).default.findOne({ email: session.user.email });
+  const user = await (await import("@/adapters/database/models/User")).default.findOne({ email: authUser.email });
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }

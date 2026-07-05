@@ -1,16 +1,15 @@
-import { getServerSession } from "next-auth";
+import { getAuthUser } from "@/server/auth/auth";
 import { NextRequest, NextResponse } from "next/server";
-import { authOptions } from "@/lib/[...nextauth]";
-import connectDB from "@/lib/mongoose";
-import File from "@/models/File";
+import connectDB from "@/adapters/database/mongoose";
+import File from "@/adapters/database/models/File";
 
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const user = await getAuthUser();
+  if (!user?.userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -23,7 +22,7 @@ export async function GET(req: NextRequest) {
 
   const regex = new RegExp(escapeRegex(q), "i");
   const files = await File.find({
-    owner_id: session.user.id,
+    owner_id: user.userId,
     status: "uploaded",
     $or: [{ filename: regex }, { searchText: regex }, { mimetype: regex }],
   })

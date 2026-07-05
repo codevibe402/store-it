@@ -1,13 +1,13 @@
 import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
-import connectDB from "@/lib/mongoose";
-import { extractSearchText } from "@/lib/fileText";
-import { BUCKET, s3 } from "@/lib/s3";
-import File from "@/models/File";
-import FileVersion from "@/models/FileVersion";
-import FolderShare from "@/models/Foldershare";
-import User from "@/models/User";
+import connectDB from "@/adapters/database/mongoose";
+import { extractSearchText } from "@/server/lib/fileText";
+import { BUCKET, s3 } from "@/adapters/storage/s3";
+import File from "@/adapters/database/models/File";
+import FileVersion from "@/adapters/database/models/FileVersion";
+import FolderShare from "@/adapters/database/models/Foldershare";
+import User from "@/adapters/database/models/User";
 
 type RouteContext = {
   params: Promise<{ token: string }>;

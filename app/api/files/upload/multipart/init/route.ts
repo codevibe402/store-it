@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/[...nextauth]";
-import connectDB from "@/lib/mongoose";
-import { s3, BUCKET } from "@/lib/s3";
+import { getAuthUser } from "@/server/auth/auth";
+import connectDB from "@/adapters/database/mongoose";
+import { s3, BUCKET } from "@/adapters/storage/s3";
 import { CreateMultipartUploadCommand } from "@aws-sdk/client-s3";
-import File from "@/models/File";
-import User from "@/models/User";
+import File from "@/adapters/database/models/File";
+import User from "@/adapters/database/models/User";
 
 const CHUNK_SIZE = 10 * 1024 * 1024; // must match frontend
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  const authUser = await getAuthUser();
+  if (!authUser?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -34,7 +33,7 @@ export async function POST(req: NextRequest) {
 
   await connectDB();
 
-  const user = await User.findOne({ email: session.user.email });
+  const user = await User.findOne({ email: authUser.email });
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }

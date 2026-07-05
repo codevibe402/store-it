@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import connectDB from "@/lib/mongoose";
-import File from "@/models/File";
-import FileVersion from "@/models/FileVersion";
-import FolderShare from "@/models/Foldershare";
-import { createS3DownloadUrl, createTelegramDownloadStream } from "@/lib/download";
+import connectDB from "@/adapters/database/mongoose";
+import File from "@/adapters/database/models/File";
+import FileVersion from "@/adapters/database/models/FileVersion";
+import FolderShare from "@/adapters/database/models/Foldershare";
+import { createS3DownloadUrl, createTelegramDownloadStream } from "@/server/lib/download";
 
 type RouteContext = {
   params: Promise<{ token: string; fileId: string }>;

@@ -1,4 +1,5 @@
 import FileUpload from "@/components/ui/fileupload";
+import LogoutButton from "@/components/LogoutButton";
 
 export default function UploadPage() {
   return (
@@ -6,6 +7,10 @@ export default function UploadPage() {
       <div className="bg-orb orb-1" />
       <div className="bg-orb orb-2" />
       <div className="bg-orb orb-3" />
+
+      <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 50 }}>
+        <LogoutButton className="px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded-lg text-sm font-medium" />
+      </div>
 
       <div className="upload-page-inner">
         <FileUpload />

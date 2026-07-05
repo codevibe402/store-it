@@ -1,16 +1,15 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/[...nextauth]";
+import { getAuthUser } from "@/server/auth/auth";
 import { NextRequest, NextResponse } from "next/server";
-import connectDB from "@/lib/mongoose";
-import Folder from "@/models/Folder";
+import connectDB from "@/adapters/database/mongoose";
+import Folder from "@/adapters/database/models/Folder";
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   await connectDB();
 
-  const folders = await Folder.find({ owner_email: session.user.email })
+  const folders = await Folder.find({ owner_email: user.email })
     .select("name owner_id parent_id createdAt _id")
     .sort({ createdAt: -1 })
     .lean();
@@ -23,8 +22,8 @@ export async function GET() {
 
 // POST /api/folders — create a new folder
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
     await connectDB();
@@ -34,8 +33,8 @@ export async function POST(req: NextRequest) {
 
     const folder = await Folder.create({
       name: name.trim(),
-      owner_id:    session.user.id,
-      owner_email: session.user.email,
+      owner_id:    user.userId,
+      owner_email: user.email,
       parent_id:   parent_id || null,
     });
 

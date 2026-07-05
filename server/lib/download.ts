@@ -1,11 +1,11 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { s3, BUCKET } from "@/lib/s3";
-import { generateFileUrl, CDN_CONFIG } from "@/lib/cdn";
-import File from "@/models/File";
-import FileVersion from "@/models/FileVersion";
-import TelegramChunk from "@/models/TelegramChunk";
-import { getFile, getFileDownloadUrl } from "@/lib/telegram";
+import { s3, BUCKET } from "@/adapters/storage/s3";
+import { generateFileUrl, CDN_CONFIG } from "@/adapters/storage/cdn";
+import File from "@/adapters/database/models/File";
+import FileVersion from "@/adapters/database/models/FileVersion";
+import TelegramChunk from "@/adapters/database/models/TelegramChunk";
+import { getFile, getFileDownloadUrl } from "@/adapters/storage/telegram";
 
 const PREFETCH = 4;
 

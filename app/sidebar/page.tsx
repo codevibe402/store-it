@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
+import { apiClient } from "@/client/lib/apiClient";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type FileType = {
@@ -151,7 +152,7 @@ export default function ShowFilesPage() {
   const { data: files = [], isLoading } = useQuery<FileType[]>({
     queryKey: ["files"],
     queryFn: async () => {
-      const res = await fetch("/api/files/fetch");
+      const res = await apiClient("/api/files/fetch");
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
@@ -169,7 +170,7 @@ export default function ShowFilesPage() {
   });
 
   const getFileUrl = async (key: string): Promise<string> => {
-    const res = await fetch("/api/files/fetch/url", {
+    const res = await apiClient("/api/files/fetch/url", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key }),
     });
@@ -198,7 +199,7 @@ export default function ShowFilesPage() {
   const openShare = async (file: FileType) => {
     setShareFile(file); setShareUrl(""); setShareCopied(false);
     try {
-      const res = await fetch(`/api/files/${file._id}/share`, { method: "POST" });
+      const res = await apiClient(`/api/files/${file._id}/share`, { method: "POST" });
       if (!res.ok) throw new Error();
       const { shareUrl: url } = await res.json();
       setShareUrl(url);

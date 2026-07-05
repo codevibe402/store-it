@@ -1,13 +1,12 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/[...nextauth]";
-import connectDB from "@/lib/mongoose";
-import File from "@/models/File";
-import Folder from "@/models/Folder";
+import { getAuthUser } from "@/server/auth/auth";
+import connectDB from "@/adapters/database/mongoose";
+import File from "@/adapters/database/models/File";
+import Folder from "@/adapters/database/models/Folder";
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session) {
+  const user = await getAuthUser();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -15,19 +14,19 @@ export async function GET() {
     await connectDB();
 
     const [files, folders, pendingFiles] = await Promise.all([
-      File.find({ owner_email: session.user.email, status: "uploaded" })
+      File.find({ owner_email: user.email, status: "uploaded" })
         .select("_id filename mimetype size folderId folders_id backend status createdAt updatedAt owner_id hash")
         .sort({ createdAt: -1 })
         .limit(100)
         .lean(),
 
-      Folder.find({ owner_email: session.user.email })
+      Folder.find({ owner_email: user.email })
         .select("name owner_id parent_id createdAt _id")
         .sort({ createdAt: -1 })
         .lean(),
 
       File.find({
-        owner_email: session.user.email,
+        owner_email: user.email,
         status: { $in: ["pending", "uploading", "paused", "fallback_cleanup", "s3_pending"] },
       })
         .select("_id filename mimetype size folderId folders_id backend status createdAt updatedAt owner_id hash")

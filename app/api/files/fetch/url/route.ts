@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/[...nextauth]";
-import connectDB from "@/lib/mongoose";
-import { generateFileUrl, CDN_CONFIG } from "@/lib/cdn";
-import File from "@/models/File";
-import User from "@/models/User";
+import { getAuthUser } from "@/server/auth/auth";
+import connectDB from "@/adapters/database/mongoose";
+import { generateFileUrl, CDN_CONFIG } from "@/adapters/storage/cdn";
+import File from "@/adapters/database/models/File";
+import User from "@/adapters/database/models/User";
 
 // ── POST /api/files/fetch/url ─────────────────────────────────────────────────
 // Returns a CloudFront URL for authenticated users to fetch their files.
@@ -14,8 +13,8 @@ import User from "@/models/User";
 // - Regular downloads use CloudFront URLs (cached 24hrs)
 // - Shares/versions use presigned URLs from other endpoints
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  const authUser = await getAuthUser();
+  if (!authUser?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -29,7 +28,7 @@ export async function POST(req: NextRequest) {
   await connectDB();
 
   // Ownership check — users can only get URLs to their own files
-  const user = await User.findOne({ email: session.user.email });
+  const user = await User.findOne({ email: authUser.email });
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }

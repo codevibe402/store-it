@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
+import { apiClient } from "@/client/lib/apiClient";
 
 type FileType = {
   _id: string;
@@ -48,7 +49,7 @@ export default function AllFilesPage() {
   const { data: files = [], isLoading } = useQuery<FileType[]>({
     queryKey: ["all-files"],
     queryFn: async () => {
-      const res = await fetch("/api/files/fetch?status=uploaded&limit=500");
+      const res = await apiClient("/api/files/fetch?status=uploaded&limit=500");
       if (!res.ok) throw new Error("Failed to fetch files");
       return res.json();
     },

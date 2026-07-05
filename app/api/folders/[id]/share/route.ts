@@ -1,24 +1,23 @@
 // app/api/folders/[id]/share/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
-import { getServerSession } from "next-auth";
+import { getAuthUser } from "@/server/auth/auth";
 import { randomBytes } from "crypto";
-import connectDB from "@/lib/mongoose";
-import { authOptions } from "@/lib/[...nextauth]";
-import FolderShare from "@/models/Foldershare";
-import Folder from "@/models/Folder";
+import connectDB from "@/adapters/database/mongoose";
+import FolderShare from "@/adapters/database/models/Foldershare";
+import Folder from "@/adapters/database/models/Folder";
 
 const REUSE_THRESHOLD_MS = 30 * 60 * 1000;
 const SHARE_PERMISSIONS = ["read", "add"] as const;
 
 async function getUserId(): Promise<string> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const user = await getAuthUser();
+  if (!user?.userId) {
     const err = new Error("Unauthorised") as Error & { status?: number };
     err.status = 401;
     throw err;
   }
-  return session.user.id;
+  return user.userId;
 }
 
 export async function POST(

@@ -1,12 +1,11 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/[...nextauth]";
-import connectDB from "@/lib/mongoose";
-import File from "@/models/File";
+import { getAuthUser } from "@/server/auth/auth";
+import connectDB from "@/adapters/database/mongoose";
+import File from "@/adapters/database/models/File";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
+  const user = await getAuthUser();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -19,7 +18,7 @@ export async function GET(req: NextRequest) {
     const limit = limitParam ? Math.min(Math.max(parseInt(limitParam) || 50, 1), 500) : undefined;
 
     let query = File.find({
-      owner_email: session.user.email,
+      owner_email: user.email,
       status: statuses.length === 1 ? statuses[0] : { $in: statuses },
     })
       .select("_id filename mimetype size folderId folders_id backend status createdAt updatedAt owner_id hash")

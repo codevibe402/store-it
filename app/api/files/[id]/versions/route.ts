@@ -1,21 +1,20 @@
 import { ObjectId } from "mongodb";
-import { getServerSession } from "next-auth";
+import { getAuthUser } from "@/server/auth/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { authOptions } from "@/lib/[...nextauth]";
-import connectDB from "@/lib/mongoose";
-import { BUCKET, s3 } from "@/lib/s3";
-import File from "@/models/File";
-import FileVersion from "@/models/FileVersion";
+import connectDB from "@/adapters/database/mongoose";
+import { BUCKET, s3 } from "@/adapters/storage/s3";
+import File from "@/adapters/database/models/File";
+import FileVersion from "@/adapters/database/models/FileVersion";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
 export async function GET(req: NextRequest, { params }: RouteContext) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const user = await getAuthUser();
+  if (!user?.userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -28,7 +27,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
 
   const file = await File.findOne({
     _id: id,
-    owner_id: session.user.id,
+    owner_id: user.userId,
     status: "uploaded",
   }).lean();
 
@@ -60,8 +59,8 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
 }
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const user = await getAuthUser();
+  if (!user?.userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -74,7 +73,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   await connectDB();
 
-  const file = await File.findOne({ _id: id, owner_id: session.user.id, status: "uploaded" }).lean();
+  const file = await File.findOne({ _id: id, owner_id: user.userId, status: "uploaded" }).lean();
   if (!file) {
     return NextResponse.json({ error: "File not found" }, { status: 404 });
   }

@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/[...nextauth]";
-import connectDB from "@/lib/mongoose";
-import File from "@/models/File";
-import FileVersion from "@/models/FileVersion";
-import TelegramChunk from "@/models/TelegramChunk";
-import User from "@/models/User";
+import { getAuthUser } from "@/server/auth/auth";
+import connectDB from "@/adapters/database/mongoose";
+import File from "@/adapters/database/models/File";
+import FileVersion from "@/adapters/database/models/FileVersion";
+import TelegramChunk from "@/adapters/database/models/TelegramChunk";
+import User from "@/adapters/database/models/User";
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  const user = await getAuthUser();
+  if (!user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -24,7 +23,7 @@ export async function POST(req: NextRequest) {
   if (!file) {
     return NextResponse.json({ error: "File not found" }, { status: 404 });
   }
-  if (file.owner_email !== session.user.email) {
+  if (file.owner_email !== user.email) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   if (file.backend !== "telegram") {

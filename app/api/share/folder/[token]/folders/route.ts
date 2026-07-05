@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import connectDB from "@/lib/mongoose";
-import Folder from "@/models/Folder";
-import File from "@/models/File";
-import FolderShare from "@/models/Foldershare";
-import User from "@/models/User";
+import connectDB from "@/adapters/database/mongoose";
+import Folder from "@/adapters/database/models/Folder";
+import File from "@/adapters/database/models/File";
+import FolderShare from "@/adapters/database/models/Foldershare";
+import User from "@/adapters/database/models/User";
 
 type RouteContext = {
   params: Promise<{ token: string }>;

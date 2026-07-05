@@ -4,7 +4,7 @@
  */
 
 import { QueryClient, DefaultOptions } from '@tanstack/react-query';
-import { CDN_CONFIG } from '@/lib/cdn';
+import { CDN_CONFIG } from '@/adapters/storage/cdn';
 
 const queryConfig: DefaultOptions = {
   queries: {

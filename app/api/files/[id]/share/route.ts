@@ -3,12 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { getServerSession } from "next-auth";
-import connectDB from "@/lib/mongoose";
-import { authOptions } from "@/lib/[...nextauth]";
-import { s3, BUCKET } from "@/lib/s3";
-import File from "@/models/File";
-import FileShare from "@/models/Fileshare";
+import { getAuthUser } from "@/server/auth/auth";
+import connectDB from "@/adapters/database/mongoose";
+import { s3, BUCKET } from "@/adapters/storage/s3";
+import File from "@/adapters/database/models/File";
+import FileShare from "@/adapters/database/models/Fileshare";
 
 // Share links are valid for 7 days. Re-calling POST within this window returns
 // the same link rather than minting a new one — preventing link sprawl.
@@ -17,13 +16,13 @@ const SHARE_TTL_MS      = SHARE_TTL_SECONDS * 1000;
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
 async function getUserId(): Promise<string> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const user = await getAuthUser();
+  if (!user?.userId) {
     const err = new Error("Unauthorised") as Error & { status?: number };
     err.status = 401;
     throw err;
   }
-  return session.user.id;
+  return user.userId;
 }
 
 // ── POST /api/files/:id/share ─────────────────────────────────────────────────

@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/[...nextauth]";
-import connectDB from "@/lib/mongoose";
-import { s3, BUCKET } from "@/lib/s3";
+import { getAuthUser } from "@/server/auth/auth";
+import connectDB from "@/adapters/database/mongoose";
+import { s3, BUCKET } from "@/adapters/storage/s3";
 import { CompleteMultipartUploadCommand } from "@aws-sdk/client-s3";
-import File from "@/models/File";
-import FileVersion from "@/models/FileVersion";
-import User from "@/models/User";
+import File from "@/adapters/database/models/File";
+import FileVersion from "@/adapters/database/models/FileVersion";
+import User from "@/adapters/database/models/User";
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  const user = await getAuthUser();
+  if (!user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

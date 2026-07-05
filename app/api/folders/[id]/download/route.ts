@@ -2,23 +2,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
-import { getServerSession } from "next-auth";
+import { getAuthUser } from "@/server/auth/auth";
 import JSZip from "jszip";
-import connectMongoose from "@/lib/mongoose";
-import { authOptions } from "@/lib/[...nextauth]";
-import { s3, BUCKET } from "@/lib/s3";
-import Folder from "@/models/Folder";
-import File from "@/models/File";
+import connectMongoose from "@/adapters/database/mongoose";
+import { s3, BUCKET } from "@/adapters/storage/s3";
+import Folder from "@/adapters/database/models/Folder";
+import File from "@/adapters/database/models/File";
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
 async function getUserId(): Promise<string> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const user = await getAuthUser();
+  if (!user?.userId) {
     const err = new Error("Unauthorised") as Error & { status?: number };
     err.status = 401;
     throw err;
   }
-  return session.user.id;
+  return user.userId;
 }
 
 // ── GET /api/folders/:id/download ─────────────────────────────────────────────

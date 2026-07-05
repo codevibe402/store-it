@@ -1,8 +1,8 @@
 import GoogleProvider from 'next-auth/providers/google';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
-import connectDB from '@/lib/mongoose';
-import User from '@/models/User';
+import connectDB from '@/adapters/database/mongoose';
+import User from '@/adapters/database/models/User';
 import NextAuth, { NextAuthOptions } from 'next-auth';
 
 type AppAuthUser = {

@@ -29,7 +29,7 @@ import {
 import {InputGroup} from "./ui/input-group"
 
 import { Input } from "./ui/input"
-import { sanitizeEmail, sanitizeUsername, sanitizePassword } from "@/lib/security"
+import { sanitizeEmail, sanitizeUsername, sanitizePassword } from "@/shared/security"
 
 type FormType = "sign-up" | "sign-in"
 
@@ -112,6 +112,9 @@ async function onSubmit(data: FormValues) {
       toast.error("Invalid credentials")
       return
     }
+
+    // Exchange next-auth session for access + refresh tokens
+    await fetch("/api/auth/exchange", { method: "POST" })
 
     toast.success("Logged in successfully!")
     router.push("/dashboard")

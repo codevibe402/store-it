@@ -1,10 +1,9 @@
 import { NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/[...nextauth]";
-import connectDB from "@/lib/mongoose";
-import File from "@/models/File";
-import TelegramChunk from "@/models/TelegramChunk";
-import { getFile, getFileDownloadUrl } from "@/lib/telegram";
+import { getAuthUser } from "@/server/auth/auth";
+import connectDB from "@/adapters/database/mongoose";
+import File from "@/adapters/database/models/File";
+import TelegramChunk from "@/adapters/database/models/TelegramChunk";
+import { getFile, getFileDownloadUrl } from "@/adapters/storage/telegram";
 
 const PREFETCH = 4;
 
@@ -18,8 +17,8 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ fileId: string }> },
 ) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  const user = await getAuthUser();
+  if (!user?.email) {
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -28,7 +27,7 @@ export async function GET(
 
   const file = await File.findById(fileId);
   if (!file) return new Response("File not found", { status: 404 });
-  if (file.owner_email !== session.user.email) return new Response("Forbidden", { status: 403 });
+  if (file.owner_email !== user.email) return new Response("Forbidden", { status: 403 });
   if (file.backend !== "telegram") return new Response("File is not stored in Telegram", { status: 409 });
   if (file.status !== "uploaded") return new Response("File not fully uploaded yet", { status: 400 });
 

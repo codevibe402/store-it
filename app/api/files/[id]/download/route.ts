@@ -1,20 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
-import { getServerSession } from "next-auth";
-import connectMongoose from "@/lib/mongoose";
-import { authOptions } from "@/lib/[...nextauth]";
-import File from "@/models/File";
-import FileVersion from "@/models/FileVersion";
-import { createS3DownloadUrl, createTelegramDownloadStream } from "@/lib/download";
+import { getAuthUser } from "@/server/auth/auth";
+import connectMongoose from "@/adapters/database/mongoose";
+import File from "@/adapters/database/models/File";
+import FileVersion from "@/adapters/database/models/FileVersion";
+import { createS3DownloadUrl, createTelegramDownloadStream } from "@/server/lib/download";
 
 async function getUserId(): Promise<string> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const user = await getAuthUser();
+  if (!user?.userId) {
     const err = new Error("Unauthorised") as Error & { status?: number };
     err.status = 401;
     throw err;
   }
-  return session.user.id;
+  return user.userId;
 }
 
 export async function GET(

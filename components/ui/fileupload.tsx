@@ -5,15 +5,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {useReducer} from "react"
 import FileSearch from "./filesearch";
-import { storeFile, getFile, removeFile } from "@/lib/indexedDB";
-// -- In-memory file cache for resume (same-session only) --
-const resumeFileMap = new Map<string, FileSystemFileHandle>();
+import { storeFile, getFile, removeFile } from "@/client/lib/indexedDB";
+import { resumeHandleCache } from "@/client/lib/resumeCache";
+import { resumeTelegramUpload } from "@/client/lib/telegramWorker";
 
 // -- Constants --
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 const CHUNK_SIZE = 10 * 1024 * 1024;
-const TELEGRAM_CHUNK_SIZE = 4 * 1024 * 1024;
-const TELEGRAM_CONCURRENCY = 6;
+
 
 // -- Types --
 type UploadStatus = "idle" | "uploading" | "paused" | "success" | "error" | "duplicate";
@@ -94,29 +93,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-function abortableDelay(ms: number, signal: AbortSignal) {
-  return new Promise<void>((resolve, reject) => {
-    if (signal.aborted) {
-      reject(Object.assign(new Error("Upload cancelled"), { isCancelled: true }));
-      return;
-    }
-
-    const timeout = window.setTimeout(resolve, ms);
-    signal.addEventListener(
-      "abort",
-      () => {
-        window.clearTimeout(timeout);
-        reject(Object.assign(new Error("Upload cancelled"), { isCancelled: true }));
-      },
-      { once: true },
-    );
-  });
-}
-
-function isAbortLike(error: unknown) {
-  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function getFileIcon(mimetype: string): string {
@@ -327,14 +303,6 @@ export default function FileUpload() {
     }
   }
 
-  async function getChunkHash(blob: Blob): Promise<string> {
-    const buffer = await blob.arrayBuffer();
-    const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-    return Array.from(new Uint8Array(hashBuffer))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-  }
-
   async function s3FallbackUpload(file: File, hash: string, fileId: string, onProgress: (pct: number) => void) {
     if (file.size < SMALL_FILE_LIMIT) {
       const formData = new FormData();
@@ -397,8 +365,6 @@ export default function FileUpload() {
   }
 
   async function telegramUpload(file: File, hash: string, onProgress: (pct: number) => void, onFileId?: (fileId: string) => void) {
-    const totalChunks = Math.ceil(file.size / TELEGRAM_CHUNK_SIZE);
-
     const initRes = await fetch("/api/files/telegram/init", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -417,81 +383,15 @@ export default function FileUpload() {
     onFileId?.(fileId);
     currentUploadRef.current = { backend: "telegram", fileId };
 
-    const resumeRes = await fetch(`/api/files/telegram/${fileId}/resume`);
-    const resumeData = resumeRes.ok ? await resumeRes.json() : null;
-    const alreadyUploaded = new Set<number>(resumeData?.uploadedIndexes ?? []);
-    let uploadedBytes = resumeData?.uploadedBytes ?? 0;
-    onProgress(Math.round((uploadedBytes / file.size) * 100));
-
-    const controller = new AbortController();
-    abortRef.current = controller;
     cancelRef.current = false;
     pauseRef.current = false;
 
-    const lock = { current: 0 };
-
-    async function worker() {
-      while (!cancelRef.current && !pauseRef.current && !controller.signal.aborted) {
-        const index = lock.current++;
-        if (index >= totalChunks) break;
-        if (alreadyUploaded.has(index)) continue;
-
-        const start = index * TELEGRAM_CHUNK_SIZE;
-        const chunkBlob = file.slice(start, Math.min(start + TELEGRAM_CHUNK_SIZE, file.size));
-        const chunkHash = await getChunkHash(chunkBlob);
-
-        const formData = new FormData();
-        formData.append("fileId", fileId);
-        formData.append("chunkIndex", String(index));
-        formData.append("hash", chunkHash);
-        formData.append("chunk", chunkBlob);
-
-        let success = false;
-        for (let attempt = 0; attempt < 3 && !success; attempt++) {
-          try {
-            if (cancelRef.current || pauseRef.current || controller.signal.aborted) {
-              throw { isCancelled: true };
-            }
-            const res = await fetch("/api/files/telegram/chunk", {
-              method: "POST", body: formData, signal: controller.signal,
-            });
-            if (cancelRef.current || pauseRef.current || controller.signal.aborted) {
-              throw { isCancelled: true };
-            }
-            if (!res.ok) {
-              const errBody = await res.json().catch(() => ({})) as {
-                canFallbackToS3?: boolean;
-                chunkIndex?: number;
-              };
-              const err = new Error(`Status ${res.status}`) as TelegramChunkError;
-              err.canFallbackToS3 = errBody.canFallbackToS3 === true;
-              err.chunkIndex = errBody.chunkIndex;
-              throw err;
-            }
-            success = true;
-            uploadedBytes += chunkBlob.size;
-            onProgress(Math.round((uploadedBytes / file.size) * 100));
-          } catch (err: unknown) {
-            const chunkError = err as TelegramChunkError;
-            if (cancelRef.current || pauseRef.current || controller.signal.aborted || isAbortLike(err) || chunkError?.isCancelled) {
-              throw { isCancelled: true };
-            }
-            if (chunkError.canFallbackToS3) throw chunkError;
-            if (attempt < 2) await abortableDelay(1000 * Math.pow(2, attempt), controller.signal);
-            else throw new Error(`Chunk ${index} failed after 3 attempts`);
-          }
-        }
-      }
-    }
-
-    const workers = Array.from({ length: TELEGRAM_CONCURRENCY }, () => worker());
     try {
-      await Promise.all(workers);
+      await resumeTelegramUpload(fileId, file, onProgress, cancelRef, pauseRef, abortRef);
     } catch (err: unknown) {
       const uploadError = err as TelegramChunkError;
       abortRef.current = null;
       cancelRef.current = true;
-      controller.abort();
 
       if (uploadError?.canFallbackToS3) {
         currentFileIdRef.current = null;
@@ -506,11 +406,8 @@ export default function FileUpload() {
             const fbErr = await fallbackRes.json().catch(() => ({ error: "Fallback failed" }));
             throw new Error(fbErr.error || "Fallback to S3 failed");
           }
-
           onProgress(0);
-
           await s3FallbackUpload(file, hash, fileId, onProgress);
-
           queryClient.invalidateQueries({ queryKey: ["dashboard"] });
           return;
         } catch (fallbackErr: unknown) {
@@ -523,20 +420,12 @@ export default function FileUpload() {
       currentUploadRef.current = null;
       throw uploadError;
     }
-    abortRef.current = null;
+
     currentFileIdRef.current = null;
     currentUploadRef.current = null;
-
     if (cancelRef.current || pauseRef.current) throw { isCancelled: true };
 
-    const completeRes = await fetch("/api/files/telegram/complete", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileId }),
-    });
-    if (!completeRes.ok) throw new Error("Failed to complete Telegram upload");
-
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-    return completeRes.json();
   }
 
   async function uploadSmart(file: File, hash: string, onProgress: (pct: number) => void, onFileId?: (fileId: string) => void) {
@@ -772,7 +661,7 @@ export default function FileUpload() {
     setProgress(0);
     if (meta?.fileId) {
       cancelledIds.current.add(meta.fileId);
-      resumeFileMap.delete(meta.fileId);
+      resumeHandleCache.delete(meta.fileId);
       removeFile(meta.fileId).catch(() => {});
     }
     setToast({ msg: "Upload cancelled.", type: "warn" });
@@ -835,10 +724,9 @@ export default function FileUpload() {
     }
 
     let capturedFileId: string | null = null
-    let identityKey: string | null = null
+    const identityKey = `${file.name}|${file.size}`
     if (handle) {
-      identityKey = `${file.name}|${file.size}`
-      resumeFileMap.set(identityKey, handle)
+      resumeHandleCache.set(identityKey, handle)
       storeFile(identityKey, {
         fileId: identityKey,
         handle,
@@ -851,7 +739,7 @@ export default function FileUpload() {
     const onFileId = (fileId: string) => {
       capturedFileId = fileId
       if (handle) {
-        resumeFileMap.set(fileId, handle)
+        resumeHandleCache.set(fileId, handle)
         storeFile(fileId, {
           fileId,
           handle,
@@ -876,11 +764,11 @@ export default function FileUpload() {
         setTimeout(() => setStatus("idle"), 3000);
       }
       if (capturedFileId && handle) {
-        resumeFileMap.delete(capturedFileId)
+        resumeHandleCache.delete(capturedFileId)
         removeFile(capturedFileId).catch(() => {})
       }
       if (identityKey) {
-        resumeFileMap.delete(identityKey)
+        resumeHandleCache.delete(identityKey)
         removeFile(identityKey).catch(() => {})
       }
     } catch (err: unknown) {
@@ -903,7 +791,7 @@ export default function FileUpload() {
     setProgress(0);
     currentFileNameRef.current = file.name;
     if (handle) {
-      resumeFileMap.set(pendingFile._id, handle)
+      resumeHandleCache.set(pendingFile._id, handle)
       storeFile(pendingFile._id, {
         fileId: pendingFile._id,
         handle,
@@ -920,13 +808,20 @@ export default function FileUpload() {
       if (pendingFile.hash && hash !== pendingFile.hash) {
         throw new Error("Selected file does not match the original. Hash mismatch.");
       }
-      await uploadSmart(file, hash, (pct) => {
-        if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-        setProgress(pct);
-      });
+      await resumeTelegramUpload(
+        pendingFile._id,
+        file,
+        (pct) => {
+          if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+          setProgress(pct);
+        },
+        cancelRef,
+        pauseRef,
+        abortRef,
+      );
       setProgress(100);
       setStatus("success");
-      resumeFileMap.delete(pendingFile._id);
+      resumeHandleCache.delete(pendingFile._id);
       removeFile(pendingFile._id).catch(() => {});
       setToast({ msg: `"${file.name}" upload resumed and completed!`, type: "success" });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
@@ -934,7 +829,7 @@ export default function FileUpload() {
     } catch (err: unknown) {
       const uploadError = err as UploadError;
       if (uploadError?.isCancelled) {
-        resumeFileMap.delete(pendingFile._id);
+        resumeHandleCache.delete(pendingFile._id);
         removeFile(pendingFile._id).catch(() => {});
         return;
       }
@@ -959,7 +854,7 @@ export default function FileUpload() {
           record = await getFile(identityKey)
         }
         if (!record) return
-        resumeFileMap.set(pf._id, record.handle)
+        resumeHandleCache.set(pf._id, record.handle)
         const opts = { mode: "read" as const }
         let permission = await record.handle.queryPermission(opts)
         if (permission !== "granted") {
@@ -970,13 +865,13 @@ export default function FileUpload() {
         const hash = await getFileHash(file)
         if (pf.hash && hash !== pf.hash) {
           removeFile(pf._id).catch(() => {})
-          resumeFileMap.delete(pf._id)
+          resumeHandleCache.delete(pf._id)
           return
         }
         handleResume(pf, file, record.handle)
       } catch {
         removeFile(pf._id).catch(() => {})
-        resumeFileMap.delete(pf._id)
+        resumeHandleCache.delete(pf._id)
       }
     })
   }, [pendingFiles])
@@ -1174,7 +1069,7 @@ export default function FileUpload() {
                         return (
                           <>
                             <button className="fu-pending-btn resume" onClick={async () => {
-                              const cachedHandle = resumeFileMap.get(pf._id);
+                              const cachedHandle = resumeHandleCache.get(pf._id);
                               if (cachedHandle) {
                                 try {
                                   const opts = { mode: "read" as const }
@@ -1186,7 +1081,7 @@ export default function FileUpload() {
                               }
                               const fromDB = await getFile(pf._id);
                               if (fromDB) {
-                                resumeFileMap.set(pf._id, fromDB.handle)
+                                resumeHandleCache.set(pf._id, fromDB.handle)
                                 try {
                                   const opts = { mode: "read" as const }
                                   if (await fromDB.handle.queryPermission(opts) !== "granted") { await fromDB.handle.requestPermission(opts) }
@@ -1198,7 +1093,7 @@ export default function FileUpload() {
                               const identityKey = `${pf.filename}|${pf.size}`
                               const byIdentity = await getFile(identityKey)
                               if (byIdentity) {
-                                resumeFileMap.set(identityKey, byIdentity.handle)
+                                resumeHandleCache.set(identityKey, byIdentity.handle)
                                 try {
                                   const opts = { mode: "read" as const }
                                   if (await byIdentity.handle.queryPermission(opts) !== "granted") { await byIdentity.handle.requestPermission(opts) }
@@ -1210,7 +1105,7 @@ export default function FileUpload() {
                               try {
                                 const [fileHandle] = await showOpenFilePicker()
                                 const file = await fileHandle.getFile()
-                                resumeFileMap.set(pf._id, fileHandle)
+                                resumeHandleCache.set(pf._id, fileHandle)
                                 await handleResume(pf, file, fileHandle)
                               } catch {
                                 const fileInput = document.createElement("input"); fileInput.type = "file"
@@ -1252,7 +1147,7 @@ export default function FileUpload() {
                       <span className="fu-pending-name">{pf.filename}</span>
                       <span className="fu-pending-meta">{formatBytes(pf.size)}</span>
                       <button className="fu-pending-btn resume" disabled={resumingId === pf._id} onClick={async () => {
-                        const cachedHandle = resumeFileMap.get(pf._id);
+                        const cachedHandle = resumeHandleCache.get(pf._id);
                         if (cachedHandle) {
                           try {
                             const opts = { mode: "read" as const }
@@ -1264,7 +1159,7 @@ export default function FileUpload() {
                         }
                         const fromDB = await getFile(pf._id);
                         if (fromDB) {
-                          resumeFileMap.set(pf._id, fromDB.handle)
+                          resumeHandleCache.set(pf._id, fromDB.handle)
                           try {
                             const opts = { mode: "read" as const }
                             if (await fromDB.handle.queryPermission(opts) !== "granted") { await fromDB.handle.requestPermission(opts) }
@@ -1276,7 +1171,7 @@ export default function FileUpload() {
                         const identityKey = `${pf.filename}|${pf.size}`
                         const byIdentity = await getFile(identityKey)
                         if (byIdentity) {
-                          resumeFileMap.set(identityKey, byIdentity.handle)
+                          resumeHandleCache.set(identityKey, byIdentity.handle)
                           try {
                             const opts = { mode: "read" as const }
                             if (await byIdentity.handle.queryPermission(opts) !== "granted") { await byIdentity.handle.requestPermission(opts) }
@@ -1288,7 +1183,7 @@ export default function FileUpload() {
                         try {
                           const [fileHandle] = await showOpenFilePicker()
                           const file = await fileHandle.getFile()
-                          resumeFileMap.set(pf._id, fileHandle)
+                          resumeHandleCache.set(pf._id, fileHandle)
                           await handleResume(pf, file, fileHandle)
                         } catch {
                           const fileInput = document.createElement("input"); fileInput.type = "file"

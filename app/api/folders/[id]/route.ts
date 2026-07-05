@@ -1,24 +1,23 @@
 // app/api/folders/[id]/route.ts
 import { DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import { ObjectId } from "mongodb";
-import { getServerSession } from "next-auth";
+import { getAuthUser } from "@/server/auth/auth";
 import { NextRequest, NextResponse } from "next/server";
-import { authOptions } from "@/lib/[...nextauth]";
-import connectMongoose from "@/lib/mongoose";
-import { BUCKET, s3 } from "@/lib/s3";
-import File from "@/models/File";
-import Folder from "@/models/Folder";
-import TelegramChunk from "@/models/TelegramChunk";
-import { deleteMessage } from "@/lib/telegram";
+import connectMongoose from "@/adapters/database/mongoose";
+import { BUCKET, s3 } from "@/adapters/storage/s3";
+import File from "@/adapters/database/models/File";
+import Folder from "@/adapters/database/models/Folder";
+import TelegramChunk from "@/adapters/database/models/TelegramChunk";
+import { deleteMessage } from "@/adapters/storage/telegram";
 
 async function getUserId(): Promise<string> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const user = await getAuthUser();
+  if (!user?.userId) {
     const err = new Error("Unauthorised") as Error & { status?: number };
     err.status = 401;
     throw err;
   }
-  return session.user.id;
+  return user.userId;
 }
 
 type RouteContext = {

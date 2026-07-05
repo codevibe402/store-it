@@ -3,7 +3,10 @@ import { useRouter } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import { getFile, storeFile, removeFile } from "@/lib/indexedDB";
+import { apiClient } from "@/client/lib/apiClient";
+import { getFile, storeFile, removeFile } from "@/client/lib/indexedDB";
+import { resumeHandleCache } from "@/client/lib/resumeCache";
+import { resumeTelegramUpload } from "@/client/lib/telegramWorker";
 
 type FileType = {
   _id: string;
@@ -34,9 +37,6 @@ type ResumeState = {
 
 type ResumeStates = Record<string, ResumeState>;
 
-const TELEGRAM_CHUNK_SIZE = 4 * 1024 * 1024;
-const TELEGRAM_CONCURRENCY = 6;
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -62,7 +62,7 @@ export default function ResumePage() {
   const pauseRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const resumeFileMap = useRef(new Map<string, FileSystemFileHandle>()).current;
+
 
   const { data: dashboard, isLoading } = useQuery<{
     files: FileType[];
@@ -71,7 +71,7 @@ export default function ResumePage() {
   }>({
     queryKey: ["dashboard"],
     queryFn: async () => {
-      const res = await fetch("/api/dashboard");
+      const res = await apiClient("/api/dashboard");
       if (!res.ok) throw new Error("Failed to load dashboard");
       return res.json();
     },
@@ -88,7 +88,7 @@ export default function ResumePage() {
       for (const pf of pendingFiles) {
         if (pf.backend !== "telegram") continue;
         try {
-          const res = await fetch(`/api/files/telegram/${pf._id}/resume`);
+          const res = await apiClient(`/api/files/telegram/${pf._id}/resume`);
           if (res.ok) {
             const data = await res.json();
             states[pf._id] = data;
@@ -114,7 +114,7 @@ export default function ResumePage() {
     abortRef.current = null;
     if (intervalRef.current) clearInterval(intervalRef.current);
 
-    resumeFileMap.delete(pf._id);
+    resumeHandleCache.delete(pf._id);
     removeFile(pf._id).catch(() => {});
     queryClient.setQueryData<{
       files: FileType[]; folders: unknown[]; pendingFiles: FileType[];
@@ -130,7 +130,7 @@ export default function ResumePage() {
       });
     } catch {}
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-  }, [queryClient, resumeFileMap]);
+  }, [queryClient]);
 
   const handlePause = useCallback(async (pf: FileType) => {
     pauseRef.current = true;
@@ -155,10 +155,8 @@ export default function ResumePage() {
     cancelRef.current = false;
     pauseRef.current = false;
 
-    const totalChunks = Math.ceil(file.size / TELEGRAM_CHUNK_SIZE);
-
     if (handle) {
-      resumeFileMap.set(pf._id, handle);
+      resumeHandleCache.set(pf._id, handle);
       storeFile(pf._id, {
         fileId: pf._id,
         handle,
@@ -170,100 +168,16 @@ export default function ResumePage() {
     }
 
     try {
-      const resumeRes = await fetch(`/api/files/telegram/${pf._id}/resume`);
-      const resumeData = resumeRes.ok ? await resumeRes.json() : null;
-      const alreadyUploaded = new Set<number>(resumeData?.uploadedIndexes ?? []);
-      let uploadedBytes = resumeData?.uploadedBytes ?? 0;
-      setResumeProgress((prev) => ({ ...prev, [pf._id]: Math.round((uploadedBytes / file.size) * 100) }));
+      await resumeTelegramUpload(
+        pf._id,
+        file,
+        (pct) => setResumeProgress((prev) => ({ ...prev, [pf._id]: pct })),
+        cancelRef,
+        pauseRef,
+        abortRef,
+      );
 
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      const lock = { current: 0 };
-
-      const worker = async () => {
-        while (!cancelRef.current && !pauseRef.current && !controller.signal.aborted) {
-          const index = lock.current++;
-          if (index >= totalChunks) break;
-          if (alreadyUploaded.has(index)) continue;
-
-          const start = index * TELEGRAM_CHUNK_SIZE;
-          const chunkBlob = file.slice(start, Math.min(start + TELEGRAM_CHUNK_SIZE, file.size));
-
-          const chunkBuffer = await chunkBlob.arrayBuffer();
-          const chunkHashBuffer = await crypto.subtle.digest("SHA-256", chunkBuffer);
-          const chunkHash = Array.from(new Uint8Array(chunkHashBuffer))
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join("");
-
-          const formData = new FormData();
-          formData.append("fileId", pf._id);
-          formData.append("chunkIndex", String(index));
-          formData.append("hash", chunkHash);
-          formData.append("chunk", chunkBlob);
-
-          let success = false;
-          for (let attempt = 0; attempt < 3 && !success; attempt++) {
-            try {
-              if (cancelRef.current || pauseRef.current || controller.signal.aborted) {
-                throw { isCancelled: true };
-              }
-              const res = await fetch("/api/files/telegram/chunk", {
-                method: "POST", body: formData, signal: controller.signal,
-              });
-              if (cancelRef.current || pauseRef.current || controller.signal.aborted) {
-                throw { isCancelled: true };
-              }
-              if (!res.ok) {
-                const errBody = await res.json().catch(() => ({}));
-                const err = new Error(`Status ${res.status}`) as Error & { canFallbackToS3?: boolean };
-                err.canFallbackToS3 = errBody.canFallbackToS3 === true;
-                throw err;
-              }
-              success = true;
-              uploadedBytes += chunkBlob.size;
-              setResumeProgress((prev) => ({ ...prev, [pf._id]: Math.round((uploadedBytes / file.size) * 100) }));
-            } catch (err: unknown) {
-              const chunkError = err as Error & { isCancelled?: boolean; canFallbackToS3?: boolean };
-              if (cancelRef.current || pauseRef.current || controller.signal.aborted || chunkError?.isCancelled) {
-                throw { isCancelled: true };
-              }
-              if (chunkError.canFallbackToS3) throw chunkError;
-              if (attempt < 2) {
-                const delay = 1000 * Math.pow(2, attempt);
-                await new Promise<void>((resolve, reject) => {
-                  if (controller.signal.aborted) { reject({ isCancelled: true }); return; }
-                  const t = setTimeout(resolve, delay);
-                  controller.signal.addEventListener("abort", () => { clearTimeout(t); reject({ isCancelled: true }); }, { once: true });
-                });
-              } else {
-                throw new Error(`Chunk ${index} failed after 3 attempts`);
-              }
-            }
-          }
-        }
-      }
-
-      const workers = Array.from({ length: TELEGRAM_CONCURRENCY }, () => worker());
-      try {
-        await Promise.all(workers);
-      } catch (err: unknown) {
-        abortRef.current = null;
-        cancelRef.current = true;
-        controller.abort();
-        throw err;
-      }
-      abortRef.current = null;
-
-      if (cancelRef.current || pauseRef.current) throw { isCancelled: true };
-
-      const completeRes = await fetch("/api/files/telegram/complete", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileId: pf._id }),
-      });
-      if (!completeRes.ok) throw new Error("Failed to complete Telegram upload");
-
-      resumeFileMap.delete(pf._id);
+      resumeHandleCache.delete(pf._id);
       removeFile(pf._id).catch(() => {});
       setResumeProgress((prev) => ({ ...prev, [pf._id]: 100 }));
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
@@ -272,7 +186,7 @@ export default function ResumePage() {
       const uploadError = err as Error & { isCancelled?: boolean };
       if (uploadError?.isCancelled) {
         if (!pauseRef.current) {
-          resumeFileMap.delete(pf._id);
+          resumeHandleCache.delete(pf._id);
           removeFile(pf._id).catch(() => {});
         }
         setResumingId(null);
@@ -282,10 +196,10 @@ export default function ResumePage() {
       setErrorMsg(uploadError?.message || "Resume failed");
       setResumeProgress((prev) => ({ ...prev, [pf._id]: -1 }));
     }
-  }, [queryClient, resumeFileMap]);
+  }, [queryClient]);
 
   const onResumeClick = useCallback(async (pf: FileType) => {
-    const cachedHandle = resumeFileMap.get(pf._id);
+    const cachedHandle = resumeHandleCache.get(pf._id);
     if (cachedHandle) {
       try {
         const opts = { mode: "read" as const };
@@ -300,7 +214,7 @@ export default function ResumePage() {
 
     const fromDB = await getFile(pf._id);
     if (fromDB) {
-      resumeFileMap.set(pf._id, fromDB.handle);
+      resumeHandleCache.set(pf._id, fromDB.handle);
       try {
         const opts = { mode: "read" as const };
         if (await fromDB.handle.queryPermission(opts) !== "granted") {
@@ -310,14 +224,14 @@ export default function ResumePage() {
         await handleResume(pf, file, fromDB.handle);
         return;
       } catch {
-        resumeFileMap.delete(pf._id);
+        resumeHandleCache.delete(pf._id);
       }
     }
 
     try {
       const [fileHandle] = await showOpenFilePicker();
       const file = await fileHandle.getFile();
-      resumeFileMap.set(pf._id, fileHandle);
+      resumeHandleCache.set(pf._id, fileHandle);
       await handleResume(pf, file, fileHandle);
     } catch {
       const fileInput = document.createElement("input");
@@ -328,7 +242,7 @@ export default function ResumePage() {
       };
       fileInput.click();
     }
-  }, [handleResume, resumeFileMap]);
+  }, [handleResume]);
 
   const getResumeProgress = (pf: FileType): number | null => {
     const rs = resumeStates?.[pf._id];

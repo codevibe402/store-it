@@ -1,12 +1,11 @@
 import mongoose from "mongoose";
-import { getServerSession } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
-import { authOptions } from "@/lib/[...nextauth]";
-import connectDB from "@/lib/mongoose";
-import File from "@/models/File";
-import Folder from "@/models/Folder";
-import Permission from "@/models/Permission";
-import User from "@/models/User";
+import { getAuthUser } from "@/server/auth/auth";
+import connectDB from "@/adapters/database/mongoose";
+import File from "@/adapters/database/models/File";
+import Folder from "@/adapters/database/models/Folder";
+import Permission from "@/adapters/database/models/Permission";
+import User from "@/adapters/database/models/User";
 
 const PERMISSIONS = ["read", "write", "admin"] as const;
 const RESOURCE_TYPES = ["file", "folder"] as const;
@@ -35,15 +34,15 @@ type LeanPermission = {
 };
 
 async function getCurrentUserId() {
-  const session = await getServerSession(authOptions);
+  const user = await getAuthUser();
 
-  if (!session?.user?.id) {
+  if (!user?.userId) {
     const error = new Error("Unauthorized") as Error & { status?: number };
     error.status = 401;
     throw error;
   }
 
-  return session.user.id;
+  return user.userId;
 }
 
 function isObjectId(value: unknown): value is string {
