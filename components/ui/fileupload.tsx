@@ -197,6 +197,7 @@ export default function FileUpload() {
   const currentUploadRef = useRef<{ backend: "s3" | "telegram"; fileId: string; uploadId?: string; key?: string } | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
   const [showPending, setShowPending] = useState(false);
+  const pausedFileRef = useRef<{ fileId: string; filename: string } | null>(null);
   const currentFileNameRef = useRef<string>("");
   const hasAttemptedAutoResume = useRef(false);
 
@@ -821,6 +822,9 @@ export default function FileUpload() {
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     }
 
+    if (meta) {
+      pausedFileRef.current = { fileId: meta.fileId, filename: currentFileNameRef.current || "Upload" };
+    }
     setStatus("paused"); setProgress(0);
     setToast({ msg: "Upload paused. You can resume later.", type: "warn" });
   };
@@ -1169,8 +1173,9 @@ export default function FileUpload() {
                     </div>
                     <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
                       {(() => {
-                        const pf = pendingFiles.find(p => p._id === currentUploadRef.current?.fileId)
-                        if (!pf) return null
+                        const paused = pausedFileRef.current
+                        if (!paused) return null
+                        const pf = pendingFiles.find(p => p._id === paused.fileId) || { _id: paused.fileId, filename: paused.filename, size: 0 } as FileType
                         return (
                           <>
                             <button className="fu-pending-btn resume" onClick={async () => {
@@ -1219,6 +1224,7 @@ export default function FileUpload() {
                               }
                             }}>Resume</button>
                             <button className="fu-pending-btn cancel" onClick={() => {
+                              pausedFileRef.current = null
                               queryClient.setQueryData<{ files: FileType[]; folders: FolderType[]; pendingFiles: FileType[] }>(["dashboard"], (old) => old ? { ...old, pendingFiles: old.pendingFiles.filter((f) => f._id !== pf._id) } : old)
                               setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" })
                               fetch("/api/files/telegram/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId: pf._id }) }).then(() => queryClient.invalidateQueries({ queryKey: ["dashboard"] })).catch(() => {})
