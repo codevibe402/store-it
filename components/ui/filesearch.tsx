@@ -75,54 +75,57 @@ export default function FileSearch({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <>
-      <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-12" onClick={onClose}>
-        <div
-          className="flex w-[560px] max-w-[94vw] max-h-[70vh] flex-col overflow-hidden rounded-[16px] border border-[#252a38] bg-[#1a1e28] shadow-[0_16px_64px_rgba(0,0,0,0.5)]"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-center gap-[10px] border-b border-[#252a38] px-4 py-[14px]">
-            <input
-              ref={inputRef}
-              className="flex-1 rounded-[10px] border border-[#252a38] bg-[#13161e] px-[14px] py-[10px] text-[0.9rem] text-[#e8eaf0] outline-none placeholder:text-[#6b7280] focus:border-[#6c8eff]"
-              placeholder="Search files by name or content..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Escape" && onClose()}
-            />
-            <button
-              className="cursor-pointer rounded-[6px] border-none bg-none px-2 py-1 text-[1.2rem] text-[#6b7280] hover:bg-[#13161e] hover:text-[#e8eaf0]"
-              onClick={onClose}
-            >x</button>
-          </div>
-          <div className="flex-1 overflow-y-auto px-4 py-3">
-            {query.trim().length < 2 ? (
-              <div className="py-8 text-center text-[0.8rem] text-[#6b7280]">Type at least 2 characters to search</div>
-            ) : loading ? (
-              <div className="py-5 text-center text-[0.8rem] text-[#6b7280]">Searching...</div>
-            ) : results.length === 0 ? (
-              <div className="py-8 text-center text-[0.8rem] text-[#6b7280]">No matches found</div>
-            ) : (
-              results.map((r) => (
-                <div
-                  key={r._id}
-                  className="flex cursor-pointer items-center gap-[10px] rounded-[10px] px-3 py-[10px] transition-colors hover:bg-[#13161e]"
-                  onClick={() => openFile(r)}
-                >
-                  <div className="shrink-0 text-[1.2rem]">{getFileIcon(r.mimetype)}</div>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[0.85rem] font-medium text-[#e8eaf0]">{r.filename}</div>
-                    {r.snippet && (
-                      <div className="mt-0.5 truncate text-[0.75rem] text-[#6b7280]">{r.snippet}</div>
-                    )}
-                  </div>
-                  <div className="shrink-0 text-[0.7rem] text-[#6b7280]">{formatBytes(r.size)}</div>
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 900, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 80 }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: "#1a1e28", border: "1px solid #252a38", borderRadius: 16, width: 560, maxWidth: "94vw", maxHeight: "70vh", display: "flex", flexDirection: "column", boxShadow: "0 16px 64px rgba(0,0,0,0.5)", overflow: "hidden", fontFamily: "'DM Sans', sans-serif" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: "1px solid #252a38" }}>
+          <input
+            ref={inputRef}
+            style={{ flex: 1, background: "#13161e", border: "1px solid #252a38", color: "#e8eaf0", borderRadius: 10, padding: "10px 14px", fontSize: "0.9rem", fontFamily: "'DM Sans', sans-serif", outline: "none" }}
+            placeholder="Search files by name or content..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && onClose()}
+          />
+          <button
+            style={{ background: "none", border: "none", color: "#6b7280", fontSize: "1.2rem", cursor: "pointer", padding: "4px 8px", borderRadius: 6, fontFamily: "'DM Sans', sans-serif" }}
+            onClick={onClose}
+          >x</button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
+          {query.trim().length < 2 ? (
+            <div style={{ textAlign: "center", color: "#6b7280", fontSize: "0.8rem", padding: "32px 0" }}>Type at least 2 characters to search</div>
+          ) : loading ? (
+            <div style={{ textAlign: "center", padding: 20, color: "#6b7280" }}>Searching...</div>
+          ) : results.length === 0 ? (
+            <div style={{ textAlign: "center", color: "#6b7280", fontSize: "0.8rem", padding: "32px 0" }}>No matches found</div>
+          ) : (
+            results.map((r) => (
+              <div
+                key={r._id}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, cursor: "pointer", transition: "background 0.12s" }}
+                onClick={() => openFile(r)}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#13161e"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+              >
+                <div style={{ fontSize: "1.2rem", flexShrink: 0 }}>{getFileIcon(r.mimetype)}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: "0.85rem", fontWeight: 500, color: "#e8eaf0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.filename}</div>
+                  {r.snippet && (
+                    <div style={{ fontSize: "0.75rem", color: "#6b7280", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 2 }}>{r.snippet}</div>
+                  )}
                 </div>
-              ))
-            )}
-          </div>
+                <div style={{ fontSize: "0.7rem", color: "#6b7280", flexShrink: 0 }}>{formatBytes(r.size)}</div>
+              </div>
+            ))
+          )}
         </div>
       </div>
-    </>
+    </div>
   );
 }
