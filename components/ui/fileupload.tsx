@@ -1297,10 +1297,9 @@ export default function FileUpload() {
                     <button className="fu-icon-btn" onClick={() => downloadFile(file)}>Download</button>
 
                     {/* Three-dot menu */}
-                    <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
+                    <div className="relative" onClick={(e) => e.stopPropagation()}>
                       <button
-                        className="fu-icon-btn"
-                        style={openMenuId === file._id ? { borderColor: "var(--border-hover)", color: "var(--text)" } : {}}
+                        className={`fu-icon-btn ${openMenuId === file._id ? "open" : ""}`}
                         onClick={(e) => {
                           if (openMenuId === file._id) {
                             setOpenMenuId(null);
@@ -1309,6 +1308,7 @@ export default function FileUpload() {
                             const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                             const menuWidth = 170;
                             let left = rect.right - menuWidth;
+                            if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - 8 - menuWidth;
                             if (left < 8) left = 8;
                             const menuHeight = 260;
                             let top = rect.bottom + 6;
@@ -1325,12 +1325,10 @@ export default function FileUpload() {
                       </button>
 
                       {openMenuId === file._id && menuPos && (
-                        <div style={{
-                          position: "fixed", left: menuPos.left, top: menuPos.top,
-                          background: "var(--surface2)", border: "1px solid var(--border)",
-                          borderRadius: "12px", padding: "5px", minWidth: "170px",
-                          zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-                        }}>
+                        <div
+                          className="fixed z-[1000] min-w-[170px] rounded-[12px] border border-[var(--border,#252a38)] bg-[var(--surface2,#1a1e28)] p-[5px] shadow-[0_8px_32px_rgba(0,0,0,0.4)]"
+                          style={{ left: menuPos.left, top: menuPos.top }}
+                        >
                           <button className="fu-ctx-item"
                             onClick={async () => { await openFile(file); setOpenMenuId(null); setMenuPos(null); }}>
                             Open
@@ -1385,7 +1383,7 @@ export default function FileUpload() {
 
       {/* -- Context menu -- */}
       {ctxMenu && (
-        <div className="fu-ctx" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
+        <div className="fixed z-[1000] min-w-[170px] animate-[ctxIn_0.12s_ease] rounded-[12px] border border-[var(--border,#252a38)] bg-[var(--surface2,#1a1e28)] p-[6px] shadow-[0_12px_40px_rgba(0,0,0,0.5)]" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
           {ctxMenu.itemType === "file" ? (
             <>
               <button className="fu-ctx-item" onClick={async () => { await openFile(ctxMenu.item as FileType); setCtxMenu(null); }}>Open</button>
