@@ -164,6 +164,7 @@ export default function FileUpload() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   const [showSearch, setShowSearch] = useState(false);
+  const [searchTop, setSearchTop] = useState(80);
   const [storageType, setStorageType] = useState<"s3" | "telegram">("telegram");
   const inputRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef(false);
@@ -926,13 +927,13 @@ export default function FileUpload() {
     <>
 
       <div className="fu-root">
-        {showSearch && <FileSearch onClose={() => setShowSearch(false)} />}
+        {showSearch && <FileSearch onClose={() => setShowSearch(false)} topOffset={searchTop} />}
 
         {/* -- Top nav -- */}
         <div className="fu-topbar">
           <div className="fu-topbar-brand">Storage</div>
           <div className="fu-topbar-actions">
-            <button className="fu-topbar-btn" onClick={() => setShowSearch(true)}>
+            <button className="fu-topbar-btn" onClick={(e) => { setSearchTop(e.currentTarget.getBoundingClientRect().bottom + 8); setShowSearch(true); }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
             </button>
             <button className="fu-topbar-btn" onClick={() => router.push("/all-files")}>
