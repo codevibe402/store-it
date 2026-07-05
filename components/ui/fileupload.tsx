@@ -1299,7 +1299,7 @@ export default function FileUpload() {
                     {/* Three-dot menu */}
                     <div className="relative" onClick={(e) => e.stopPropagation()}>
                       <button
-                        className={`fu-icon-btn ${openMenuId === file._id ? "open" : ""}`}
+                        className={`fu-icon-btn ${openMenuId === file._id ? "border-[var(--border-hover,#353c52)] text-[var(--text,#e8eaf0)]" : ""}`}
                         onClick={(e) => {
                           if (openMenuId === file._id) {
                             setOpenMenuId(null);

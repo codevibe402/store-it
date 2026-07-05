@@ -78,7 +78,7 @@ export default function FileSearch({ onClose }: { onClose: () => void }) {
     <>
       <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-20" onClick={onClose}>
         <div
-          className="flex w-[560px] max-w-[94vw] max-h-[70vh] flex-col overflow-hidden rounded-[16px] border border-[var(--border,#252a38)] bg-[var(--surface2,#1a1e28)] shadow-[0_16px_64px_rgba(0,0,0,0.5)]"
+          className="flex w-[560px] max-w-[94vw] max-h-[70vh] flex-col overflow-hidden rounded-[16px] border border-[var(--border,#252a38)] bg-[var(--surface2,#1a1e28)] font-['DM_Sans',sans-serif] shadow-[0_16px_64px_rgba(0,0,0,0.5)]"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center gap-[10px] border-b border-[var(--border,#252a38)] px-4 py-[14px]">
