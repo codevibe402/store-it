@@ -168,6 +168,7 @@ export default function FileUpload() {
   const cancelRef = useRef(false);
   const pauseRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  const fileHandleRef = useRef<FileSystemFileHandle | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const currentFileIdRef = useRef<string | null>(null);
   const currentUploadRef = useRef<{ backend: "s3" | "telegram"; fileId: string; uploadId?: string; key?: string } | null>(null);
@@ -726,6 +727,7 @@ export default function FileUpload() {
     let capturedFileId: string | null = null
     const identityKey = `${file.name}|${file.size}`
     if (handle) {
+      fileHandleRef.current = handle
       resumeHandleCache.set(identityKey, handle)
       storeFile(identityKey, {
         fileId: identityKey,
@@ -791,6 +793,7 @@ export default function FileUpload() {
     setProgress(0);
     currentFileNameRef.current = file.name;
     if (handle) {
+      fileHandleRef.current = handle
       resumeHandleCache.set(pendingFile._id, handle)
       storeFile(pendingFile._id, {
         fileId: pendingFile._id,
@@ -1069,6 +1072,16 @@ export default function FileUpload() {
                         return (
                           <>
                             <button className="fu-pending-btn resume" onClick={async () => {
+                              const refHandle = fileHandleRef.current
+                              if (refHandle) {
+                                try {
+                                  const opts = { mode: "read" as const }
+                                  if (await refHandle.queryPermission(opts) !== "granted") { await refHandle.requestPermission(opts) }
+                                  const file = await refHandle.getFile()
+                                  await handleResume(pf, file, refHandle)
+                                  return
+                                } catch {}
+                              }
                               const cachedHandle = resumeHandleCache.get(pf._id);
                               if (cachedHandle) {
                                 try {
@@ -1076,8 +1089,8 @@ export default function FileUpload() {
                                   if (await cachedHandle.queryPermission(opts) !== "granted") { await cachedHandle.requestPermission(opts) }
                                   const file = await cachedHandle.getFile()
                                   await handleResume(pf, file, cachedHandle)
-                                } catch { setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" }) }
-                                return;
+                                  return
+                                } catch {}
                               }
                               const fromDB = await getFile(pf._id);
                               if (fromDB) {
@@ -1087,8 +1100,8 @@ export default function FileUpload() {
                                   if (await fromDB.handle.queryPermission(opts) !== "granted") { await fromDB.handle.requestPermission(opts) }
                                   const file = await fromDB.handle.getFile()
                                   await handleResume(pf, file, fromDB.handle)
-                                } catch { setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" }) }
-                                return;
+                                  return
+                                } catch {}
                               }
                               const identityKey = `${pf.filename}|${pf.size}`
                               const byIdentity = await getFile(identityKey)
@@ -1099,8 +1112,8 @@ export default function FileUpload() {
                                   if (await byIdentity.handle.queryPermission(opts) !== "granted") { await byIdentity.handle.requestPermission(opts) }
                                   const file = await byIdentity.handle.getFile()
                                   await handleResume(pf, file, byIdentity.handle)
-                                } catch { setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" }) }
-                                return
+                                  return
+                                } catch {}
                               }
                               try {
                                 const [fileHandle] = await showOpenFilePicker()
@@ -1147,6 +1160,16 @@ export default function FileUpload() {
                       <span className="fu-pending-name">{pf.filename}</span>
                       <span className="fu-pending-meta">{formatBytes(pf.size)}</span>
                       <button className="fu-pending-btn resume" disabled={resumingId === pf._id} onClick={async () => {
+                        const refHandle = fileHandleRef.current
+                        if (refHandle) {
+                          try {
+                            const opts = { mode: "read" as const }
+                            if (await refHandle.queryPermission(opts) !== "granted") { await refHandle.requestPermission(opts) }
+                            const file = await refHandle.getFile()
+                            await handleResume(pf, file, refHandle)
+                            return
+                          } catch {}
+                        }
                         const cachedHandle = resumeHandleCache.get(pf._id);
                         if (cachedHandle) {
                           try {
@@ -1154,8 +1177,8 @@ export default function FileUpload() {
                             if (await cachedHandle.queryPermission(opts) !== "granted") { await cachedHandle.requestPermission(opts) }
                             const file = await cachedHandle.getFile()
                             await handleResume(pf, file, cachedHandle)
-                          } catch { setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" }) }
-                          return;
+                            return
+                          } catch {}
                         }
                         const fromDB = await getFile(pf._id);
                         if (fromDB) {
@@ -1165,8 +1188,8 @@ export default function FileUpload() {
                             if (await fromDB.handle.queryPermission(opts) !== "granted") { await fromDB.handle.requestPermission(opts) }
                             const file = await fromDB.handle.getFile()
                             await handleResume(pf, file, fromDB.handle)
-                          } catch { setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" }) }
-                          return;
+                            return
+                          } catch {}
                         }
                         const identityKey = `${pf.filename}|${pf.size}`
                         const byIdentity = await getFile(identityKey)
@@ -1177,8 +1200,8 @@ export default function FileUpload() {
                             if (await byIdentity.handle.queryPermission(opts) !== "granted") { await byIdentity.handle.requestPermission(opts) }
                             const file = await byIdentity.handle.getFile()
                             await handleResume(pf, file, byIdentity.handle)
-                          } catch { setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" }) }
-                          return
+                            return
+                          } catch {}
                         }
                         try {
                           const [fileHandle] = await showOpenFilePicker()
