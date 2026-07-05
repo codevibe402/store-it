@@ -16,7 +16,7 @@ const TELEGRAM_CHUNK_SIZE = 4 * 1024 * 1024;
 const TELEGRAM_CONCURRENCY = 6;
 
 // -- Types --
-type UploadStatus = "idle" | "uploading" | "success" | "error" | "duplicate";
+type UploadStatus = "idle" | "uploading" | "paused" | "success" | "error" | "duplicate";
 
 type FileType = {
   _id: string;
@@ -196,6 +196,7 @@ export default function FileUpload() {
   const currentFileIdRef = useRef<string | null>(null);
   const currentUploadRef = useRef<{ backend: "s3" | "telegram"; fileId: string; uploadId?: string; key?: string } | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
+  const [showPending, setShowPending] = useState(false);
   const currentFileNameRef = useRef<string>("");
   const hasAttemptedAutoResume = useRef(false);
 
@@ -820,7 +821,7 @@ export default function FileUpload() {
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     }
 
-    setStatus("idle"); setProgress(0);
+    setStatus("paused"); setProgress(0);
     setToast({ msg: "Upload paused. You can resume later.", type: "warn" });
   };
 
@@ -1139,12 +1140,13 @@ export default function FileUpload() {
           </div>
 
           {/* Active Uploads */}
-          {(status === "uploading" || pendingFiles.length > 0) && (
+          {(status === "uploading" || status === "paused" || (!showPending && pendingFiles.length > 0)) && (
             <div>
-              <div className="fu-section-header">
-                <span className="fu-section-title">Active Uploads</span>
-                <span className="fu-section-count">{status === "uploading" ? 1 + pendingFiles.length : pendingFiles.length}</span>
-              </div>
+              {(status === "uploading" || status === "paused") && (
+                <div className="fu-section-header">
+                  <span className="fu-section-title">{status === "paused" ? "Paused Upload" : "Uploading"}</span>
+                </div>
+              )}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {status === "uploading" && (
                   <div className="fu-pending-row" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px" }}>
@@ -1159,26 +1161,104 @@ export default function FileUpload() {
                     </div>
                   </div>
                 )}
-                {pendingFiles.map((pf) => (
-                  <div key={pf._id} className="fu-pending-row" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
-                    <span className="fu-pending-name">{pf.filename}</span>
-                    <span className="fu-pending-meta">{formatBytes(pf.size)}</span>
-                    <button
-                      className="fu-pending-btn resume"
-                      disabled={resumingId === pf._id}
-                      onClick={async () => {
+                {status === "paused" && (
+                  <div className="fu-pending-row" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span className="fu-pending-name">{currentFileNameRef.current || "Paused"}</span>
+                      <span className="fu-pending-meta">Paused</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                      {(() => {
+                        const pf = pendingFiles.find(p => p._id === currentUploadRef.current?.fileId)
+                        if (!pf) return null
+                        return (
+                          <>
+                            <button className="fu-pending-btn resume" onClick={async () => {
+                              const cachedHandle = resumeFileMap.get(pf._id);
+                              if (cachedHandle) {
+                                try {
+                                  const opts = { mode: "read" as const }
+                                  if (await cachedHandle.queryPermission(opts) !== "granted") { await cachedHandle.requestPermission(opts) }
+                                  const file = await cachedHandle.getFile()
+                                  await handleResume(pf, file, cachedHandle)
+                                } catch { setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" }) }
+                                return;
+                              }
+                              const fromDB = await getFile(pf._id);
+                              if (fromDB) {
+                                resumeFileMap.set(pf._id, fromDB.handle)
+                                try {
+                                  const opts = { mode: "read" as const }
+                                  if (await fromDB.handle.queryPermission(opts) !== "granted") { await fromDB.handle.requestPermission(opts) }
+                                  const file = await fromDB.handle.getFile()
+                                  await handleResume(pf, file, fromDB.handle)
+                                } catch { setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" }) }
+                                return;
+                              }
+                              const identityKey = `${pf.filename}|${pf.size}`
+                              const byIdentity = await getFile(identityKey)
+                              if (byIdentity) {
+                                resumeFileMap.set(identityKey, byIdentity.handle)
+                                try {
+                                  const opts = { mode: "read" as const }
+                                  if (await byIdentity.handle.queryPermission(opts) !== "granted") { await byIdentity.handle.requestPermission(opts) }
+                                  const file = await byIdentity.handle.getFile()
+                                  await handleResume(pf, file, byIdentity.handle)
+                                } catch { setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" }) }
+                                return
+                              }
+                              try {
+                                const [fileHandle] = await showOpenFilePicker()
+                                const file = await fileHandle.getFile()
+                                resumeFileMap.set(pf._id, fileHandle)
+                                await handleResume(pf, file, fileHandle)
+                              } catch {
+                                const fileInput = document.createElement("input"); fileInput.type = "file"
+                                fileInput.onchange = async () => { const f = fileInput.files?.[0]; if (f) await handleResume(pf, f) }
+                                fileInput.click()
+                              }
+                            }}>Resume</button>
+                            <button className="fu-pending-btn cancel" onClick={() => {
+                              queryClient.setQueryData<{ files: FileType[]; folders: FolderType[]; pendingFiles: FileType[] }>(["dashboard"], (old) => old ? { ...old, pendingFiles: old.pendingFiles.filter((f) => f._id !== pf._id) } : old)
+                              setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" })
+                              fetch("/api/files/telegram/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId: pf._id }) }).then(() => queryClient.invalidateQueries({ queryKey: ["dashboard"] })).catch(() => {})
+                              setStatus("idle")
+                            }}>Cancel</button>
+                          </>
+                        )
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Pending Uploads Toggle */}
+          {pendingFiles.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <button
+                className="fu-action-btn"
+                onClick={() => setShowPending(!showPending)}
+                style={{ width: "100%", textAlign: "center", justifyContent: "center" }}
+              >
+                {showPending ? `Hide pending uploads` : `Show pending uploads (${pendingFiles.length})`}
+              </button>
+              {showPending && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                  {pendingFiles.map((pf) => (
+                    <div key={pf._id} className="fu-pending-row" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+                      <span className="fu-pending-name">{pf.filename}</span>
+                      <span className="fu-pending-meta">{formatBytes(pf.size)}</span>
+                      <button className="fu-pending-btn resume" disabled={resumingId === pf._id} onClick={async () => {
                         const cachedHandle = resumeFileMap.get(pf._id);
                         if (cachedHandle) {
                           try {
                             const opts = { mode: "read" as const }
-                            if (await cachedHandle.queryPermission(opts) !== "granted") {
-                              await cachedHandle.requestPermission(opts)
-                            }
+                            if (await cachedHandle.queryPermission(opts) !== "granted") { await cachedHandle.requestPermission(opts) }
                             const file = await cachedHandle.getFile()
                             await handleResume(pf, file, cachedHandle)
-                          } catch {
-                            setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" })
-                          }
+                          } catch { setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" }) }
                           return;
                         }
                         const fromDB = await getFile(pf._id);
@@ -1186,14 +1266,10 @@ export default function FileUpload() {
                           resumeFileMap.set(pf._id, fromDB.handle)
                           try {
                             const opts = { mode: "read" as const }
-                            if (await fromDB.handle.queryPermission(opts) !== "granted") {
-                              await fromDB.handle.requestPermission(opts)
-                            }
+                            if (await fromDB.handle.queryPermission(opts) !== "granted") { await fromDB.handle.requestPermission(opts) }
                             const file = await fromDB.handle.getFile()
                             await handleResume(pf, file, fromDB.handle)
-                          } catch {
-                            setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" })
-                          }
+                          } catch { setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" }) }
                           return;
                         }
                         const identityKey = `${pf.filename}|${pf.size}`
@@ -1202,14 +1278,10 @@ export default function FileUpload() {
                           resumeFileMap.set(identityKey, byIdentity.handle)
                           try {
                             const opts = { mode: "read" as const }
-                            if (await byIdentity.handle.queryPermission(opts) !== "granted") {
-                              await byIdentity.handle.requestPermission(opts)
-                            }
+                            if (await byIdentity.handle.queryPermission(opts) !== "granted") { await byIdentity.handle.requestPermission(opts) }
                             const file = await byIdentity.handle.getFile()
                             await handleResume(pf, file, byIdentity.handle)
-                          } catch {
-                            setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" })
-                          }
+                          } catch { setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" }) }
                           return
                         }
                         try {
@@ -1218,42 +1290,20 @@ export default function FileUpload() {
                           resumeFileMap.set(pf._id, fileHandle)
                           await handleResume(pf, file, fileHandle)
                         } catch {
-                          const fileInput = document.createElement("input");
-                          fileInput.type = "file";
-                          fileInput.onchange = async () => {
-                            const f = fileInput.files?.[0];
-                            if (f) await handleResume(pf, f);
-                          };
-                          fileInput.click();
+                          const fileInput = document.createElement("input"); fileInput.type = "file"
+                          fileInput.onchange = async () => { const f = fileInput.files?.[0]; if (f) await handleResume(pf, f) }
+                          fileInput.click()
                         }
-                      }}
-                    >
-                      {resumingId === pf._id ? "Resuming..." : "Resume"}
-                    </button>
-                    <button
-                      className="fu-pending-btn cancel"
-                      onClick={() => {
-                        queryClient.setQueryData<{
-                          files: FileType[]; folders: FolderType[]; pendingFiles: FileType[];
-                        }>(["dashboard"], (old) => old ? {
-                          ...old,
-                          pendingFiles: old.pendingFiles.filter((f) => f._id !== pf._id),
-                        } : old);
-                        setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" });
-                        fetch("/api/files/telegram/cancel", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ fileId: pf._id }),
-                        }).then(() => {
-                          queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-                        }).catch(() => {});
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ))}
-              </div>
+                      }}>{resumingId === pf._id ? "Resuming..." : "Resume"}</button>
+                      <button className="fu-pending-btn cancel" onClick={() => {
+                        queryClient.setQueryData<{ files: FileType[]; folders: FolderType[]; pendingFiles: FileType[] }>(["dashboard"], (old) => old ? { ...old, pendingFiles: old.pendingFiles.filter((f) => f._id !== pf._id) } : old)
+                        setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" })
+                        fetch("/api/files/telegram/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId: pf._id }) }).then(() => queryClient.invalidateQueries({ queryKey: ["dashboard"] })).catch(() => {})
+                      }}>Cancel</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
