@@ -8,6 +8,8 @@ import connectMongoose from "@/lib/mongoose";
 import { BUCKET, s3 } from "@/lib/s3";
 import File from "@/models/File";
 import Folder from "@/models/Folder";
+import TelegramChunk from "@/models/TelegramChunk";
+import { deleteMessage } from "@/lib/telegram";
 
 async function getUserId(): Promise<string> {
   const session = await getServerSession(authOptions);
@@ -116,15 +118,27 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
         status: "uploaded",
       }).lean();
 
-      const s3Keys = containedFiles.map((file) => ({ Key: file.storageUrl }));
+      const s3Files = containedFiles.filter((f) => f.backend !== "telegram");
+      const telegramFiles = containedFiles.filter((f) => f.backend === "telegram");
 
-      for (let i = 0; i < s3Keys.length; i += 1000) {
-        await s3.send(
-          new DeleteObjectsCommand({
-            Bucket: BUCKET,
-            Delete: { Objects: s3Keys.slice(i, i + 1000), Quiet: true },
-          })
-        );
+      if (s3Files.length > 0) {
+        const s3Keys = s3Files.map((file) => ({ Key: file.storageUrl }));
+        for (let i = 0; i < s3Keys.length; i += 1000) {
+          await s3.send(
+            new DeleteObjectsCommand({
+              Bucket: BUCKET,
+              Delete: { Objects: s3Keys.slice(i, i + 1000), Quiet: true },
+            })
+          );
+        }
+      }
+
+      for (const tf of telegramFiles) {
+        const chunks = await TelegramChunk.find({ fileId: tf._id });
+        for (const chunk of chunks) {
+          try { await deleteMessage(chunk.telegramMessageId); } catch {}
+        }
+        await TelegramChunk.deleteMany({ fileId: tf._id });
       }
 
       await File.deleteMany({

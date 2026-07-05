@@ -8,6 +8,8 @@ import connectMongoose from "@/lib/mongoose";
 import { BUCKET, s3 } from "@/lib/s3";
 import File from "@/models/File";
 import Folder from "@/models/Folder";
+import TelegramChunk from "@/models/TelegramChunk";
+import { deleteMessage } from "@/lib/telegram";
 
 async function getUserId(): Promise<string> {
   const session = await getServerSession(authOptions);
@@ -110,7 +112,16 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
-    await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: file.storageUrl }));
+    if (file.backend === "telegram") {
+      const chunks = await TelegramChunk.find({ fileId: id });
+      for (const chunk of chunks) {
+        try { await deleteMessage(chunk.telegramMessageId); } catch {}
+      }
+      await TelegramChunk.deleteMany({ fileId: id });
+    } else {
+      await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: file.storageUrl }));
+    }
+
     await File.deleteOne({ _id: id, owner_id: userId });
 
     return NextResponse.json({ success: true, deleted: file.filename });
