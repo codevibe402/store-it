@@ -46,7 +46,7 @@ async function cleanupOldRecords(db: IDBDatabase): Promise<void> {
       if (cursor) {
         const key = cursor.key as string
         const record = cursor.value as UploadRecord
-        if (key.startsWith("__temp_") || record.storedAt < cutoff) {
+        if (record.storedAt < cutoff) {
           cursor.delete()
         }
         cursor.continue()

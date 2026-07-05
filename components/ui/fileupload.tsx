@@ -835,12 +835,12 @@ export default function FileUpload() {
     }
 
     let capturedFileId: string | null = null
-    let tempId: string | null = null
+    let identityKey: string | null = null
     if (handle) {
-      tempId = `__temp_${Date.now()}`
-      resumeFileMap.set(tempId, handle)
-      storeFile(tempId, {
-        fileId: tempId,
+      identityKey = `${file.name}|${file.size}`
+      resumeFileMap.set(identityKey, handle)
+      storeFile(identityKey, {
+        fileId: identityKey,
         handle,
         filename: file.name,
         size: file.size,
@@ -851,10 +851,6 @@ export default function FileUpload() {
     const onFileId = (fileId: string) => {
       capturedFileId = fileId
       if (handle) {
-        if (tempId) {
-          resumeFileMap.delete(tempId)
-          removeFile(tempId).catch(() => {})
-        }
         resumeFileMap.set(fileId, handle)
         storeFile(fileId, {
           fileId,
@@ -882,20 +878,15 @@ export default function FileUpload() {
       if (capturedFileId && handle) {
         resumeFileMap.delete(capturedFileId)
         removeFile(capturedFileId).catch(() => {})
-      } else if (tempId) {
-        resumeFileMap.delete(tempId)
-        removeFile(tempId).catch(() => {})
+      }
+      if (identityKey) {
+        resumeFileMap.delete(identityKey)
+        removeFile(identityKey).catch(() => {})
       }
     } catch (err: unknown) {
       const uploadError = err as UploadError;
       if (intervalRef.current) clearInterval(intervalRef.current);
-      if (uploadError?.isCancelled) {
-        if (tempId) {
-          resumeFileMap.delete(tempId)
-          removeFile(tempId).catch(() => {})
-        }
-        return;
-      }
+      if (uploadError?.isCancelled) return;
       if (uploadError?.isDuplicate) {
         setStatus("duplicate"); setDuplicateFile(uploadError.existingFile ?? null);
         setToast({ msg: "This file already exists in your storage.", type: "warn" });
@@ -962,7 +953,11 @@ export default function FileUpload() {
     hasAttemptedAutoResume.current = true
     pendingFiles.forEach(async (pf) => {
       try {
-        const record = await getFile(pf._id)
+        let record = await getFile(pf._id)
+        if (!record) {
+          const identityKey = `${pf.filename}|${pf.size}`
+          record = await getFile(identityKey)
+        }
         if (!record) return
         resumeFileMap.set(pf._id, record.handle)
         const opts = { mode: "read" as const }
@@ -1200,6 +1195,22 @@ export default function FileUpload() {
                             setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" })
                           }
                           return;
+                        }
+                        const identityKey = `${pf.filename}|${pf.size}`
+                        const byIdentity = await getFile(identityKey)
+                        if (byIdentity) {
+                          resumeFileMap.set(identityKey, byIdentity.handle)
+                          try {
+                            const opts = { mode: "read" as const }
+                            if (await byIdentity.handle.queryPermission(opts) !== "granted") {
+                              await byIdentity.handle.requestPermission(opts)
+                            }
+                            const file = await byIdentity.handle.getFile()
+                            await handleResume(pf, file, byIdentity.handle)
+                          } catch {
+                            setToast({ msg: "Cannot access the original file. Please reselect it.", type: "error" })
+                          }
+                          return
                         }
                         try {
                           const [fileHandle] = await showOpenFilePicker()
