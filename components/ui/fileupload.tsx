@@ -812,6 +812,12 @@ export default function FileUpload() {
 
     const meta = currentUploadRef.current;
     if (meta) {
+      pausedFileRef.current = { fileId: meta.fileId, filename: currentFileNameRef.current || "Upload" };
+    }
+    setStatus("paused"); setProgress(0);
+    setToast({ msg: "Upload paused. You can resume later.", type: "warn" });
+
+    if (meta) {
       try {
         await fetch("/api/files/telegram/pause", {
           method: "POST",
@@ -821,12 +827,6 @@ export default function FileUpload() {
       } catch {}
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     }
-
-    if (meta) {
-      pausedFileRef.current = { fileId: meta.fileId, filename: currentFileNameRef.current || "Upload" };
-    }
-    setStatus("paused"); setProgress(0);
-    setToast({ msg: "Upload paused. You can resume later.", type: "warn" });
   };
 
   const handleFile = async (file: File, handle?: FileSystemFileHandle) => {
