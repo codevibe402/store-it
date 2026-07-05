@@ -78,45 +78,45 @@ export default function FileSearch({ onClose }: { onClose: () => void }) {
     <>
       <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-20" onClick={onClose}>
         <div
-          className="flex w-[560px] max-w-[94vw] flex-col overflow-hidden rounded-2xl border border-[var(--border,#252a38)] bg-[var(--surface2,#1a1e28)] shadow-2xl"
+          className="flex w-[560px] max-w-[94vw] max-h-[70vh] flex-col overflow-hidden rounded-[16px] border border-[var(--border,#252a38)] bg-[var(--surface2,#1a1e28)] shadow-[0_16px_64px_rgba(0,0,0,0.5)]"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="flex items-center gap-2.5 border-b border-[var(--border,#252a38)] p-3.5">
+          <div className="flex items-center gap-[10px] border-b border-[var(--border,#252a38)] px-4 py-[14px]">
             <input
               ref={inputRef}
-              className="flex-1 rounded-xl border border-[var(--border,#252a38)] bg-[var(--surface,#13161e)] px-3.5 py-2.5 text-sm text-[var(--text,#e8eaf0)] outline-none placeholder:text-[var(--text-muted,#6b7280)] focus:border-[var(--accent,#6c8eff)]"
+              className="flex-1 rounded-[10px] border border-[var(--border,#252a38)] bg-[var(--surface,#13161e)] px-[14px] py-[10px] text-[0.9rem] text-[var(--text,#e8eaf0)] outline-none placeholder:text-[var(--text-muted,#6b7280)] focus:border-[var(--accent,#6c8eff)]"
               placeholder="Search files by name or content..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Escape" && onClose()}
             />
             <button
-              className="cursor-pointer rounded-lg border-none bg-none px-2 py-1 text-lg text-[var(--text-muted,#6b7280)] hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]"
+              className="cursor-pointer rounded-[6px] border-none bg-none px-2 py-1 text-[1.2rem] text-[var(--text-muted,#6b7280)] hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]"
               onClick={onClose}
             >x</button>
           </div>
-          <div className="flex-1 overflow-y-auto p-3">
+          <div className="flex-1 overflow-y-auto px-4 py-3">
             {query.trim().length < 2 ? (
-              <div className="py-8 text-center text-sm text-[var(--text-muted,#6b7280)]">Type at least 2 characters to search</div>
+              <div className="py-8 text-center text-[0.8rem] text-[var(--text-muted,#6b7280)]">Type at least 2 characters to search</div>
             ) : loading ? (
-              <div className="py-5 text-center text-sm text-[var(--text-muted,#6b7280)]">Searching...</div>
+              <div className="py-5 text-center text-[0.8rem] text-[var(--text-muted,#6b7280)]">Searching...</div>
             ) : results.length === 0 ? (
-              <div className="py-8 text-center text-sm text-[var(--text-muted,#6b7280)]">No matches found</div>
+              <div className="py-8 text-center text-[0.8rem] text-[var(--text-muted,#6b7280)]">No matches found</div>
             ) : (
               results.map((r) => (
                 <div
                   key={r._id}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2.5 transition-colors hover:bg-[var(--surface,#13161e)]"
+                  className="flex cursor-pointer items-center gap-[10px] rounded-[10px] px-3 py-[10px] transition-colors hover:bg-[var(--surface,#13161e)]"
                   onClick={() => openFile(r)}
                 >
-                  <div className="shrink-0 text-lg">{getFileIcon(r.mimetype)}</div>
+                  <div className="shrink-0 text-[1.2rem]">{getFileIcon(r.mimetype)}</div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-[var(--text,#e8eaf0)]">{r.filename}</div>
+                    <div className="truncate text-[0.85rem] font-medium text-[var(--text,#e8eaf0)]">{r.filename}</div>
                     {r.snippet && (
-                      <div className="mt-0.5 truncate text-xs text-[var(--text-muted,#6b7280)]">{r.snippet}</div>
+                      <div className="mt-0.5 truncate text-[0.75rem] text-[var(--text-muted,#6b7280)]">{r.snippet}</div>
                     )}
                   </div>
-                  <div className="shrink-0 text-xs text-[var(--text-muted,#6b7280)]">{formatBytes(r.size)}</div>
+                  <div className="shrink-0 text-[0.7rem] text-[var(--text-muted,#6b7280)]">{formatBytes(r.size)}</div>
                 </div>
               ))
             )}
