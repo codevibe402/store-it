@@ -199,6 +199,7 @@ export default function ResumePage() {
   }, [queryClient]);
 
   const onResumeClick = useCallback(async (pf: FileType) => {
+    // 1️⃣ Try cached handle (in‑memory)
     const cachedHandle = resumeHandleCache.get(pf._id);
     if (cachedHandle) {
       try {
@@ -209,42 +210,55 @@ export default function ResumePage() {
         const file = await cachedHandle.getFile();
         await handleResume(pf, file, cachedHandle);
         return;
-      } catch {}
+      } catch {
+        // Stale or permission‑failed handle – clean up both cache and IndexedDB
+        resumeHandleCache.delete(pf._id);
+        await removeFile(pf._id).catch(() => {});
+      }
     }
 
+    // 2️⃣ Try persisted handle from IndexedDB (keyed by fileId)
     const fromDB = await getFile(pf._id);
     if (fromDB) {
-      resumeHandleCache.set(pf._id, fromDB.handle);
       try {
         const opts = { mode: "read" as const };
         if (await fromDB.handle.queryPermission(opts) !== "granted") {
           await fromDB.handle.requestPermission(opts);
         }
         const file = await fromDB.handle.getFile();
+        // Re‑cache in‑memory for faster subsequent resumes
+        resumeHandleCache.set(pf._id, fromDB.handle);
         await handleResume(pf, file, fromDB.handle);
         return;
       } catch {
+        // Invalid persisted handle – purge it
         resumeHandleCache.delete(pf._id);
+        await removeFile(pf._id).catch(() => {});
       }
     }
 
-    const identityKey = `${pf.filename}|${pf.size}`
-    const byIdentity = await getFile(identityKey)
+    // 3️⃣ Fallback: try handle persisted by identity (filename|size)
+    const identityKey = `${pf.filename}|${pf.size}`;
+    const byIdentity = await getFile(identityKey);
     if (byIdentity) {
-      resumeHandleCache.set(identityKey, byIdentity.handle)
       try {
         const opts = { mode: "read" as const };
         if (await byIdentity.handle.queryPermission(opts) !== "granted") {
           await byIdentity.handle.requestPermission(opts);
         }
         const file = await byIdentity.handle.getFile();
+        // Cache under the real fileId for future attempts
+        resumeHandleCache.set(pf._id, byIdentity.handle);
         await handleResume(pf, file, byIdentity.handle);
         return;
       } catch {
+        // Stale identity handle – clean up both entries
         resumeHandleCache.delete(identityKey);
+        await removeFile(identityKey).catch(() => {});
       }
     }
 
+    // 4️⃣ Final fallback: ask the user to pick the file again
     try {
       const [fileHandle] = await showOpenFilePicker();
       const file = await fileHandle.getFile();
