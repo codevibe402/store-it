@@ -1051,14 +1051,8 @@ export default function FileUpload() {
                             <button className="fu-pending-btn resume" onClick={async () => {
                               const savedFile = resumeFileCache.get(pf._id) || resumeFileCache.get(`${pf.filename}|${pf.size}`)
                               if (savedFile) {
-                                try {
-                                  const hash = await getFileHash(savedFile)
-                                  const isMatch = !pf.hash || hash === pf.hash
-                                  if (isMatch) {
-                                    await startResumeUpload(pf, savedFile, fileHandleRef.current ?? undefined)
-                                    return
-                                  }
-                                } catch {}
+                                await startResumeUpload(pf, savedFile, fileHandleRef.current ?? undefined)
+                                return
                               }
                               // Before any async calls, capture the user gesture
                               const pickResult = await getFileForResume()
@@ -1148,14 +1142,8 @@ export default function FileUpload() {
                       <button className="fu-pending-btn resume" disabled={resumingId === pf._id} onClick={async () => {
                         const savedFile = resumeFileCache.get(pf._id) || resumeFileCache.get(`${pf.filename}|${pf.size}`)
                         if (savedFile) {
-                          try {
-                            const hash = await getFileHash(savedFile)
-                            const isMatch = !pf.hash || hash === pf.hash
-                            if (isMatch) {
-                              await startResumeUpload(pf, savedFile, fileHandleRef.current ?? undefined)
-                              return
-                            }
-                          } catch {}
+                          await startResumeUpload(pf, savedFile, fileHandleRef.current ?? undefined)
+                          return
                         }
                         // Capture the user gesture before any async work
                         const pickResult = await getFileForResume()
