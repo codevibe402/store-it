@@ -62,6 +62,8 @@ export async function resumeUpload(
   abortRef: { current: AbortController | null },
   onProgress?: (pct: number) => void,
 ): Promise<ResumeResult> {
+  cancelRef.current = false;
+  pauseRef.current = false;
   if (handle) {
     resumeHandleCache.set(pendingFile._id, handle);
     storeFile(pendingFile._id, {

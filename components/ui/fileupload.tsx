@@ -792,6 +792,8 @@ export default function FileUpload() {
     setProgress(0);
     currentFileNameRef.current = file.name;
     if (handle) fileHandleRef.current = handle;
+    cancelRef.current = false;
+    pauseRef.current = false;
 
     const result = await resumeUpload(pf, file, handle, cancelRef, pauseRef, abortRef, (pct) => {
       if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
