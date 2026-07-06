@@ -5,8 +5,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { apiClient } from "@/client/lib/apiClient";
 import { getFile, storeFile, removeFile } from "@/client/lib/indexedDB";
-import { resumeHandleCache } from "@/client/lib/resumeCache";
+import { resumeHandleCache, resumeFileCache } from "@/client/lib/resumeCache";
 import { resumeTelegramUpload } from "@/client/lib/telegramWorker";
+import { getFileHash } from "@/client/lib/hash";
 
 type FileType = {
   _id: string;
@@ -46,6 +47,95 @@ function formatBytes(bytes: number): string {
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+type ResumeResult =
+  | { kind: "success" }
+  | { kind: "cancelled" }
+  | { kind: "error"; message: string };
+
+export async function resumeUpload(
+  pendingFile: FileType,
+  file: File,
+  handle: FileSystemFileHandle | undefined,
+  cancelRef: { current: boolean },
+  pauseRef: { current: boolean },
+  abortRef: { current: AbortController | null },
+  onProgress?: (pct: number) => void,
+): Promise<ResumeResult> {
+  if (handle) {
+    resumeHandleCache.set(pendingFile._id, handle);
+    storeFile(pendingFile._id, {
+      fileId: pendingFile._id,
+      handle,
+      filename: file.name,
+      size: file.size,
+      lastModified: file.lastModified,
+      storedAt: Date.now(),
+    }).catch(() => {});
+  }
+
+  try {
+    const hash = await getFileHash(file);
+    if (pendingFile.hash && hash !== pendingFile.hash) {
+      return { kind: "error", message: "Selected file does not match the original. Hash mismatch." };
+    }
+    await resumeTelegramUpload(
+      pendingFile._id,
+      file,
+      (pct) => onProgress?.(pct),
+      cancelRef,
+      pauseRef,
+      abortRef,
+    );
+    resumeHandleCache.delete(pendingFile._id);
+    removeFile(pendingFile._id).catch(() => {});
+    return { kind: "success" };
+  } catch (err: unknown) {
+    const uploadError = err as Error & { isCancelled?: boolean };
+    if (uploadError?.isCancelled) {
+      return { kind: "cancelled" };
+    }
+    return { kind: "error", message: uploadError?.message || "Resume failed" };
+  }
+}
+
+export function getFileForResume(): Promise<{ file: File; handle?: FileSystemFileHandle } | null> {
+  return new Promise((resolve) => {
+    if (typeof showOpenFilePicker === "function") {
+      showOpenFilePicker()
+        .then(async ([fileHandle]) => {
+          const file = await fileHandle.getFile();
+          resolve({ file, handle: fileHandle });
+        })
+        .catch(() => tryInputPicker(resolve));
+    } else {
+      tryInputPicker(resolve);
+    }
+  });
+  function tryInputPicker(resolve: (v: { file: File; handle?: FileSystemFileHandle } | null) => void) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.onchange = () => {
+      const f = input.files?.[0];
+      resolve(f ? { file: f } : null);
+    };
+    input.click();
+    setTimeout(() => resolve(null), 60_000);
+  }
+}
+
+export function pickFileFallback(): Promise<{ file: File; handle?: FileSystemFileHandle } | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.onchange = () => {
+      const f = input.files?.[0];
+      resolve(f ? { file: f } : null);
+    };
+    input.click();
+    setTimeout(() => resolve(null), 60_000);
+  });
 }
 
 export default function ResumePage() {
@@ -155,51 +245,27 @@ export default function ResumePage() {
     cancelRef.current = false;
     pauseRef.current = false;
 
-    if (handle) {
-      resumeHandleCache.set(pf._id, handle);
-      storeFile(pf._id, {
-        fileId: pf._id,
-        handle,
-        filename: file.name,
-        size: file.size,
-        lastModified: file.lastModified,
-        storedAt: Date.now(),
-      }).catch(() => {});
-    }
+    const result = await resumeUpload(pf, file, handle, cancelRef, pauseRef, abortRef, (pct) => {
+      setResumeProgress((prev) => ({ ...prev, [pf._id]: pct }));
+    });
 
-    try {
-      await resumeTelegramUpload(
-        pf._id,
-        file,
-        (pct) => setResumeProgress((prev) => ({ ...prev, [pf._id]: pct })),
-        cancelRef,
-        pauseRef,
-        abortRef,
-      );
-
-      resumeHandleCache.delete(pf._id);
-      removeFile(pf._id).catch(() => {});
+    if (result.kind === "success") {
       setResumeProgress((prev) => ({ ...prev, [pf._id]: 100 }));
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      setResumingId(null);
-    } catch (err: unknown) {
-      const uploadError = err as Error & { isCancelled?: boolean };
-      if (uploadError?.isCancelled) {
-        if (!pauseRef.current) {
-          resumeHandleCache.delete(pf._id);
-          removeFile(pf._id).catch(() => {});
-        }
-        setResumingId(null);
-        return;
+    } else if (result.kind === "cancelled") {
+      if (!pauseRef.current) {
+        resumeHandleCache.delete(pf._id);
+        removeFile(pf._id).catch(() => {});
       }
-      setResumingId(null);
-      setErrorMsg(uploadError?.message || "Resume failed");
+    } else {
+      setErrorMsg(result.message);
       setResumeProgress((prev) => ({ ...prev, [pf._id]: -1 }));
     }
+    setResumingId(null);
   }, [queryClient]);
 
   const onResumeClick = useCallback(async (pf: FileType) => {
-    // 1️⃣ Try cached handle (in‑memory)
+    // 1️⃣ Try cached handle (in‑memory) – this is synchronous, no gesture lost
     const cachedHandle = resumeHandleCache.get(pf._id);
     if (cachedHandle) {
       try {
@@ -211,68 +277,72 @@ export default function ResumePage() {
         await handleResume(pf, file, cachedHandle);
         return;
       } catch {
-        // Stale or permission‑failed handle – clean up both cache and IndexedDB
         resumeHandleCache.delete(pf._id);
         await removeFile(pf._id).catch(() => {});
       }
     }
 
-    // 2️⃣ Try persisted handle from IndexedDB (keyed by fileId)
+    // 2️⃣ No cached handle → capture the user gesture NOW before any async work.
+    //    If the browser supports showOpenFilePicker, it preserves the gesture.
+    //    Give it up to 2 tries to handle transient UI glitches.
+    let pickResult: { file: File; handle?: FileSystemFileHandle } | null = null;
+    for (let attempt = 0; attempt < 2 && !pickResult; attempt++) {
+      if (typeof showOpenFilePicker === "function") {
+        try {
+          const [fileHandle] = await showOpenFilePicker();
+          const file = await fileHandle.getFile();
+          pickResult = { file, handle: fileHandle };
+        } catch {
+          // fall through to the <input> fallback
+        }
+      }
+      if (!pickResult) {
+        pickResult = await pickFileFallback();
+      }
+    }
+    if (!pickResult) return; // user cancelled everything
+
+    // 3️⃣ Now we have a file – try IndexedDB lookups for a persisted handle (best-effort).
+    //    The file picker already gave us a File object, so these lookups are optional.
     const fromDB = await getFile(pf._id);
     if (fromDB) {
+      const h = fromDB.handle;
       try {
-        const opts = { mode: "read" as const };
-        if (await fromDB.handle.queryPermission(opts) !== "granted") {
-          await fromDB.handle.requestPermission(opts);
+        if (await h.queryPermission({ mode: "read" }) !== "granted") {
+          await h.requestPermission({ mode: "read" });
         }
-        const file = await fromDB.handle.getFile();
-        // Re‑cache in‑memory for faster subsequent resumes
-        resumeHandleCache.set(pf._id, fromDB.handle);
-        await handleResume(pf, file, fromDB.handle);
+        const f = await h.getFile();
+        resumeHandleCache.set(pf._id, h);
+        await handleResume(pf, f, h);
         return;
       } catch {
-        // Invalid persisted handle – purge it
         resumeHandleCache.delete(pf._id);
         await removeFile(pf._id).catch(() => {});
       }
     }
-
-    // 3️⃣ Fallback: try handle persisted by identity (filename|size)
     const identityKey = `${pf.filename}|${pf.size}`;
     const byIdentity = await getFile(identityKey);
     if (byIdentity) {
+      const h = byIdentity.handle;
       try {
-        const opts = { mode: "read" as const };
-        if (await byIdentity.handle.queryPermission(opts) !== "granted") {
-          await byIdentity.handle.requestPermission(opts);
+        if (await h.queryPermission({ mode: "read" }) !== "granted") {
+          await h.requestPermission({ mode: "read" });
         }
-        const file = await byIdentity.handle.getFile();
-        // Cache under the real fileId for future attempts
-        resumeHandleCache.set(pf._id, byIdentity.handle);
-        await handleResume(pf, file, byIdentity.handle);
+        const f = await h.getFile();
+        resumeHandleCache.set(pf._id, h);
+        await handleResume(pf, f, h);
         return;
       } catch {
-        // Stale identity handle – clean up both entries
         resumeHandleCache.delete(identityKey);
         await removeFile(identityKey).catch(() => {});
       }
     }
 
-    // 4️⃣ Final fallback: ask the user to pick the file again
-    try {
-      const [fileHandle] = await showOpenFilePicker();
-      const file = await fileHandle.getFile();
-      resumeHandleCache.set(pf._id, fileHandle);
-      await handleResume(pf, file, fileHandle);
-    } catch {
-      const fileInput = document.createElement("input");
-      fileInput.type = "file";
-      fileInput.onchange = async () => {
-        const f = fileInput.files?.[0];
-        if (f) await handleResume(pf, f);
-      };
-      fileInput.click();
+    // 4️⃣ No IndexedDB handle – use the file from the picker
+    if (pickResult.handle) {
+      resumeHandleCache.set(pf._id, pickResult.handle);
     }
+    await handleResume(pf, pickResult.file, pickResult.handle);
   }, [handleResume]);
 
   const getResumeProgress = (pf: FileType): number | null => {

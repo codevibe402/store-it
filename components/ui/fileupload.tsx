@@ -6,8 +6,10 @@ import { useSession } from "next-auth/react";
 import {useReducer} from "react"
 import FileSearch from "./filesearch";
 import { storeFile, getFile, removeFile } from "@/client/lib/indexedDB";
-import { resumeHandleCache } from "@/client/lib/resumeCache";
+import { resumeHandleCache, resumeFileCache } from "@/client/lib/resumeCache";
 import { resumeTelegramUpload } from "@/client/lib/telegramWorker";
+import { getFileHash } from "@/client/lib/hash";
+import { resumeUpload, getFileForResume } from "@/app/resume/page";
 
 // -- Constants --
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
@@ -80,14 +82,6 @@ type TelegramChunkError = Error & {
 };
 
 // -- Utils --
-async function getFileHash(file: File): Promise<string> {
-  const buffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -663,6 +657,7 @@ export default function FileUpload() {
     setStatus("idle");
     setProgress(0);
     if (meta?.fileId) {
+      resumeFileCache.delete(meta.fileId);
       cancelledIds.current.add(meta.fileId);
       resumeHandleCache.delete(meta.fileId);
       removeFile(meta.fileId).catch(() => {});
@@ -728,6 +723,7 @@ export default function FileUpload() {
 
     let capturedFileId: string | null = null
     const identityKey = `${file.name}|${file.size}`
+    resumeFileCache.set(identityKey, file)
     if (handle) {
       fileHandleRef.current = handle
       resumeHandleCache.set(identityKey, handle)
@@ -742,6 +738,7 @@ export default function FileUpload() {
     }
     const onFileId = (fileId: string) => {
       capturedFileId = fileId
+      resumeFileCache.set(fileId, file)
       if (handle) {
         resumeHandleCache.set(fileId, handle)
         storeFile(fileId, {
@@ -789,61 +786,32 @@ export default function FileUpload() {
     }
   };
 
-  const handleResume = async (pendingFile: FileType, file: File, handle?: FileSystemFileHandle) => {
-    setResumingId(pendingFile._id);
+  const startResumeUpload = async (pf: FileType, file: File, handle?: FileSystemFileHandle) => {
+    setResumingId(pf._id);
     setStatus("uploading");
     setProgress(0);
     currentFileNameRef.current = file.name;
-    if (handle) {
-      fileHandleRef.current = handle
-      resumeHandleCache.set(pendingFile._id, handle)
-      storeFile(pendingFile._id, {
-        fileId: pendingFile._id,
-        handle,
-        filename: file.name,
-        size: file.size,
-        lastModified: file.lastModified,
-        storedAt: Date.now(),
-      }).catch(() => {})
-    }
-    cancelRef.current = false;
-    pauseRef.current = false;
-    try {
-      const hash = await getFileHash(file);
-      if (pendingFile.hash && hash !== pendingFile.hash) {
-        throw new Error("Selected file does not match the original. Hash mismatch.");
-      }
-      await resumeTelegramUpload(
-        pendingFile._id,
-        file,
-        (pct) => {
-          if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-          setProgress(pct);
-        },
-        cancelRef,
-        pauseRef,
-        abortRef,
-      );
+    if (handle) fileHandleRef.current = handle;
+
+    const result = await resumeUpload(pf, file, handle, cancelRef, pauseRef, abortRef, (pct) => {
+      if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+      setProgress(pct);
+    });
+
+    if (result.kind === "success") {
       setProgress(100);
       setStatus("success");
-      resumeHandleCache.delete(pendingFile._id);
-      removeFile(pendingFile._id).catch(() => {});
       setToast({ msg: `"${file.name}" upload resumed and completed!`, type: "success" });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       setTimeout(() => setStatus("idle"), 3000);
-    } catch (err: unknown) {
-      const uploadError = err as UploadError;
-      if (uploadError?.isCancelled) {
-        resumeHandleCache.delete(pendingFile._id);
-        removeFile(pendingFile._id).catch(() => {});
-        return;
-      }
+    } else if (result.kind === "cancelled") {
+      // upload cancelled or paused – cleanup handled by resumeUpload
+    } else {
       setStatus("error");
-      setErrorMsg(uploadError?.message || "Resume failed");
-      setToast({ msg: uploadError?.message || "Resume failed.", type: "error" });
-    } finally {
-      setResumingId(null);
+      setErrorMsg(result.message);
+      setToast({ msg: result.message || "Resume failed.", type: "error" });
     }
+    setResumingId(null);
   };
 
   // -- Auto-resume on page refresh --
@@ -873,7 +841,7 @@ export default function FileUpload() {
           resumeHandleCache.delete(pf._id)
           return
         }
-        handleResume(pf, file, record.handle)
+        startResumeUpload(pf, file, record.handle)
       } catch {
         removeFile(pf._id).catch(() => {})
         resumeHandleCache.delete(pf._id)
@@ -1081,13 +1049,27 @@ export default function FileUpload() {
                         return (
                           <>
                             <button className="fu-pending-btn resume" onClick={async () => {
+                              const savedFile = resumeFileCache.get(pf._id) || resumeFileCache.get(`${pf.filename}|${pf.size}`)
+                              if (savedFile) {
+                                try {
+                                  const hash = await getFileHash(savedFile)
+                                  const isMatch = !pf.hash || hash === pf.hash
+                                  if (isMatch) {
+                                    await startResumeUpload(pf, savedFile, fileHandleRef.current ?? undefined)
+                                    return
+                                  }
+                                } catch {}
+                              }
+                              // Before any async calls, capture the user gesture
+                              const pickResult = await getFileForResume()
+                              if (!pickResult) return
                               const refHandle = fileHandleRef.current
                               if (refHandle) {
                                 try {
                                   const opts = { mode: "read" as const }
                                   if (await refHandle.queryPermission(opts) !== "granted") { await refHandle.requestPermission(opts) }
                                   const file = await refHandle.getFile()
-                                  await handleResume(pf, file, refHandle)
+                                  await startResumeUpload(pf, file, refHandle)
                                   return
                                 } catch {}
                               }
@@ -1097,7 +1079,7 @@ export default function FileUpload() {
                                   const opts = { mode: "read" as const }
                                   if (await cachedHandle.queryPermission(opts) !== "granted") { await cachedHandle.requestPermission(opts) }
                                   const file = await cachedHandle.getFile()
-                                  await handleResume(pf, file, cachedHandle)
+                                  await startResumeUpload(pf, file, cachedHandle)
                                   return
                                 } catch {}
                               }
@@ -1108,7 +1090,7 @@ export default function FileUpload() {
                                   const opts = { mode: "read" as const }
                                   if (await fromDB.handle.queryPermission(opts) !== "granted") { await fromDB.handle.requestPermission(opts) }
                                   const file = await fromDB.handle.getFile()
-                                  await handleResume(pf, file, fromDB.handle)
+                                  await startResumeUpload(pf, file, fromDB.handle)
                                   return
                                 } catch {}
                               }
@@ -1120,20 +1102,15 @@ export default function FileUpload() {
                                   const opts = { mode: "read" as const }
                                   if (await byIdentity.handle.queryPermission(opts) !== "granted") { await byIdentity.handle.requestPermission(opts) }
                                   const file = await byIdentity.handle.getFile()
-                                  await handleResume(pf, file, byIdentity.handle)
+                                  await startResumeUpload(pf, file, byIdentity.handle)
                                   return
                                 } catch {}
                               }
-                              try {
-                                const [fileHandle] = await showOpenFilePicker()
-                                const file = await fileHandle.getFile()
-                                resumeHandleCache.set(pf._id, fileHandle)
-                                await handleResume(pf, file, fileHandle)
-                              } catch {
-                                const fileInput = document.createElement("input"); fileInput.type = "file"
-                                fileInput.onchange = async () => { const f = fileInput.files?.[0]; if (f) await handleResume(pf, f) }
-                                fileInput.click()
+                              // Use the file from the gesture capture
+                              if (pickResult.handle) {
+                                resumeHandleCache.set(pf._id, pickResult.handle)
                               }
+                              await startResumeUpload(pf, pickResult.file, pickResult.handle)
                             }}>Resume</button>
                             <button className="fu-pending-btn cancel" onClick={() => {
                               pausedFileRef.current = null
@@ -1169,13 +1146,27 @@ export default function FileUpload() {
                       <span className="fu-pending-name">{pf.filename}</span>
                       <span className="fu-pending-meta">{formatBytes(pf.size)}</span>
                       <button className="fu-pending-btn resume" disabled={resumingId === pf._id} onClick={async () => {
+                        const savedFile = resumeFileCache.get(pf._id) || resumeFileCache.get(`${pf.filename}|${pf.size}`)
+                        if (savedFile) {
+                          try {
+                            const hash = await getFileHash(savedFile)
+                            const isMatch = !pf.hash || hash === pf.hash
+                            if (isMatch) {
+                              await startResumeUpload(pf, savedFile, fileHandleRef.current ?? undefined)
+                              return
+                            }
+                          } catch {}
+                        }
+                        // Capture the user gesture before any async work
+                        const pickResult = await getFileForResume()
+                        if (!pickResult) return
                         const refHandle = fileHandleRef.current
                         if (refHandle) {
                           try {
                             const opts = { mode: "read" as const }
                             if (await refHandle.queryPermission(opts) !== "granted") { await refHandle.requestPermission(opts) }
                             const file = await refHandle.getFile()
-                            await handleResume(pf, file, refHandle)
+                            await startResumeUpload(pf, file, refHandle)
                             return
                           } catch {}
                         }
@@ -1185,7 +1176,7 @@ export default function FileUpload() {
                             const opts = { mode: "read" as const }
                             if (await cachedHandle.queryPermission(opts) !== "granted") { await cachedHandle.requestPermission(opts) }
                             const file = await cachedHandle.getFile()
-                            await handleResume(pf, file, cachedHandle)
+                            await startResumeUpload(pf, file, cachedHandle)
                             return
                           } catch {}
                         }
@@ -1196,7 +1187,7 @@ export default function FileUpload() {
                             const opts = { mode: "read" as const }
                             if (await fromDB.handle.queryPermission(opts) !== "granted") { await fromDB.handle.requestPermission(opts) }
                             const file = await fromDB.handle.getFile()
-                            await handleResume(pf, file, fromDB.handle)
+                            await startResumeUpload(pf, file, fromDB.handle)
                             return
                           } catch {}
                         }
@@ -1208,20 +1199,15 @@ export default function FileUpload() {
                             const opts = { mode: "read" as const }
                             if (await byIdentity.handle.queryPermission(opts) !== "granted") { await byIdentity.handle.requestPermission(opts) }
                             const file = await byIdentity.handle.getFile()
-                            await handleResume(pf, file, byIdentity.handle)
+                            await startResumeUpload(pf, file, byIdentity.handle)
                             return
                           } catch {}
                         }
-                        try {
-                          const [fileHandle] = await showOpenFilePicker()
-                          const file = await fileHandle.getFile()
-                          resumeHandleCache.set(pf._id, fileHandle)
-                          await handleResume(pf, file, fileHandle)
-                        } catch {
-                          const fileInput = document.createElement("input"); fileInput.type = "file"
-                          fileInput.onchange = async () => { const f = fileInput.files?.[0]; if (f) await handleResume(pf, f) }
-                          fileInput.click()
+                        // Use the file from the gesture capture
+                        if (pickResult.handle) {
+                          resumeHandleCache.set(pf._id, pickResult.handle)
                         }
+                        await startResumeUpload(pf, pickResult.file, pickResult.handle)
                       }}>{resumingId === pf._id ? "Resuming..." : "Resume"}</button>
                       <button className="fu-pending-btn cancel" onClick={() => {
                         cancelledIds.current.add(pf._id)
