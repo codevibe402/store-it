@@ -1270,8 +1270,6 @@ export default function FileUpload() {
                       Open
                     </button>
                     <button className="fu-icon-btn share" onClick={() => openShareModal(file)}>Share</button>
-                    <button className="fu-icon-btn" onClick={() => openVersions(file)}>Versions</button>
-                    <button className="fu-icon-btn" onClick={() => downloadFile(file)}>Download</button>
 
                     {/* Three-dot menu */}
                     <div className="relative" onClick={(e) => e.stopPropagation()}>
@@ -1302,34 +1300,23 @@ export default function FileUpload() {
                       </button>
 
                       {openMenuId === file._id && menuPos && (
-                        <div
-                          className="fixed z-[1000] min-w-[170px] rounded-[12px] border border-[var(--border,#252a38)] bg-[var(--surface2,#1a1e28)] p-[5px] shadow-[0_8px_32px_rgba(0,0,0,0.4)]"
-                          style={{ left: menuPos.left, top: menuPos.top }}
-                        >
-                          <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]"
-                            onClick={async () => { await openFile(file); setOpenMenuId(null); setMenuPos(null); }}>
-                            Open
-                          </button>
-                          <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]"
-                            onClick={() => { openShareModal(file); setOpenMenuId(null); setMenuPos(null); }}>
-                            Share
-                          </button>
-                          <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]"
+                        <div className="fu-ctx" style={{ left: menuPos.left, top: menuPos.top, minWidth: 160, padding: 4 }}>
+                          <button className="fu-ctx-item"
                             onClick={() => { openVersions(file); setOpenMenuId(null); setMenuPos(null); }}>
-                            Version history
+                            📋 Version history
                           </button>
-                          <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]"
+                          <button className="fu-ctx-item"
                             onClick={() => { downloadFile(file); setOpenMenuId(null); setMenuPos(null); }}>
-                      Download
+                            ⬇️ Download
                           </button>
-                          <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]"
+                          <button className="fu-ctx-item"
                             onClick={() => { setMoveTarget(file); setOpenMenuId(null); setMenuPos(null); }}>
-                            Move to folder
+                            📁 Move to folder
                           </button>
-                          <div className="h-px bg-[var(--border,#252a38)] my-1" />
-                          <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)] hover:text-[var(--error,#f87171)] hover:bg-[rgba(248,113,113,0.08)]"
+                          <div className="fu-ctx-sep" />
+                          <button className="fu-ctx-item danger"
                              onClick={() => { setDeleteTarget({ type: "file", item: file }); setOpenMenuId(null); setMenuPos(null); }}>
-                             Delete
+                             🗑️ Delete
                            </button>
                         </div>
                       )}
