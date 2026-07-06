@@ -7,7 +7,6 @@ import { apiClient } from "@/client/lib/apiClient";
 import { getFile, storeFile, removeFile } from "@/client/lib/indexedDB";
 import { resumeHandleCache, resumeFileCache } from "@/client/lib/resumeCache";
 import { resumeTelegramUpload } from "@/client/lib/telegramWorker";
-import { getFileHash } from "@/client/lib/hash";
 
 type FileType = {
   _id: string;
@@ -76,10 +75,6 @@ export async function resumeUpload(
   }
 
   try {
-    const hash = await getFileHash(file);
-    if (pendingFile.hash && hash !== pendingFile.hash) {
-      return { kind: "error", message: "Selected file does not match the original. Hash mismatch." };
-    }
     await resumeTelegramUpload(
       pendingFile._id,
       file,
@@ -282,7 +277,14 @@ export default function ResumePage() {
       }
     }
 
-    // 2️⃣ No cached handle → capture the user gesture NOW before any async work.
+    // 2️⃣ Try cached File from memory (fast path – no handle needed)
+    const cachedFile = resumeFileCache.get(pf._id) || resumeFileCache.get(`${pf.filename}|${pf.size}`);
+    if (cachedFile) {
+      await handleResume(pf, cachedFile, resumeHandleCache.get(pf._id));
+      return;
+    }
+
+    // 3️⃣ No cached handle → capture the user gesture NOW before any async work.
     //    If the browser supports showOpenFilePicker, it preserves the gesture.
     //    Give it up to 2 tries to handle transient UI glitches.
     let pickResult: { file: File; handle?: FileSystemFileHandle } | null = null;
@@ -302,7 +304,7 @@ export default function ResumePage() {
     }
     if (!pickResult) return; // user cancelled everything
 
-    // 3️⃣ Now we have a file – try IndexedDB lookups for a persisted handle (best-effort).
+    // 4️⃣ Now we have a file – try IndexedDB lookups for a persisted handle (best-effort).
     //    The file picker already gave us a File object, so these lookups are optional.
     const fromDB = await getFile(pf._id);
     if (fromDB) {
