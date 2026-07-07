@@ -3,82 +3,29 @@ import LogoutButton from "@/components/LogoutButton";
 
 export default function UploadPage() {
   return (
-    <main className="upload-page">
-      <div className="bg-orb orb-1" />
-      <div className="bg-orb orb-2" />
-      <div className="bg-orb orb-3" />
+    <main className="relative min-h-screen overflow-hidden bg-[#0a0b0f] px-6 py-10">
+      {/* Background Orbs */}
+      <div className="absolute -top-40 -left-32 h-[600px] w-[600px] rounded-full bg-indigo-500/20 blur-[120px]" />
+      <div className="absolute -bottom-28 -right-20 h-[500px] w-[500px] rounded-full bg-violet-500/15 blur-[120px]" />
+      <div className="absolute left-1/2 top-1/2 h-[400px] w-[400px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-500/10 blur-[120px]" />
 
-      <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 50 }}>
-        <LogoutButton className="px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded-lg text-sm font-medium" />
+      <div className="relative z-10 mx-auto flex w-full max-w-7xl flex-col gap-8">
+
+        {/* Top Bar */}
+        <header className="flex items-center justify-between">
+          <h1 className="bg-gradient-to-r from-white to-indigo-400 bg-clip-text text-3xl font-bold tracking-tight text-transparent">
+            StoreIt
+          </h1>
+
+          <LogoutButton className="rounded-lg border border-red-400/20 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 transition hover:bg-red-500/20" />
+        </header>
+
+        {/* Upload Component */}
+        <div className="w-full">
+          <FileUpload />
+        </div>
+
       </div>
-
-      <div className="upload-page-inner">
-        <FileUpload />
-      </div>
-
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-        .upload-page {
-          min-height: 100vh;
-          width: 100%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: #0a0b0f;
-          font-family: 'Inter', sans-serif;
-          padding: 24px;
-          box-sizing: border-box;
-          position: relative;
-          overflow: hidden;
-        }
-
-        /* Ambient background orbs */
-        .bg-orb {
-          position: absolute;
-          border-radius: 50%;
-          filter: blur(120px);
-          pointer-events: none;
-          z-index: 0;
-        }
-        .orb-1 {
-          width: 600px;
-          height: 600px;
-          background: radial-gradient(circle, rgba(99, 102, 241, 0.18) 0%, transparent 70%);
-          top: -150px;
-          left: -100px;
-        }
-        .orb-2 {
-          width: 500px;
-          height: 500px;
-          background: radial-gradient(circle, rgba(139, 92, 246, 0.14) 0%, transparent 70%);
-          bottom: -100px;
-          right: -80px;
-        }
-        .orb-3 {
-          width: 400px;
-          height: 400px;
-          background: radial-gradient(circle, rgba(59, 130, 246, 0.10) 0%, transparent 70%);
-          top: 40%;
-          left: 50%;
-          transform: translateX(-50%);
-        }
-
-        .upload-page-inner {
-          position: relative;
-          z-index: 1;
-          width: 100%;
-          max-width: 1200px;
-          display: flex;
-          flex-direction: column;
-          align-items: stretch;
-        }
-
-        /* Override FileUpload container to fill space */
-        .upload-page-inner > * {
-          width: 100%;
-        }
-      `}</style>
     </main>
   );
 }
