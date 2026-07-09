@@ -68,29 +68,25 @@ async function _getKeyFromPassword(password: string): Promise<CryptoKey> {
   );
 }
 
-/** @deprecated Use generateEncryptionKey() instead */
-export async function encryptFile(file: File, password: string): Promise<{ encrypted: Blob; iv: string; key: string }> {
-  const key = await _getKeyFromPassword(password);
-  const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+/** @deprecated Use generateEncryptionKey() + encryptChunk() instead */
+export async function encryptFile(file: File, _password: string): Promise<{ encrypted: Blob; iv: string; key: string }> {
+  const { key, iv } = await generateEncryptionKey();
   const buffer = await file.arrayBuffer();
   const encryptedBuffer = await crypto.subtle.encrypt(
-    { name: LEGACY_ALGORITHM, iv },
-    key,
+    { name: ALGORITHM, iv: new Uint8Array(atob(iv).split("").map(c => c.charCodeAt(0))) },
+    await crypto.subtle.importKey("raw", new Uint8Array(atob(key).split("").map(c => c.charCodeAt(0))), ALGORITHM, false, ["encrypt"]),
     buffer
   );
   const encrypted = new Blob([encryptedBuffer], { type: "application/octet-stream" });
-  const ivBase64 = btoa(String.fromCharCode(...iv));
-  const keyRaw = await crypto.subtle.exportKey("raw", key);
-  const keyBase64 = btoa(String.fromCharCode(...new Uint8Array(keyRaw)));
-  return { encrypted, iv: ivBase64, key: keyBase64 };
+  return { encrypted, iv, key };
 }
 
 /** @deprecated Use decryptChunk() instead */
 export async function decryptFile(encryptedBlob: Blob, iv: string, key: string): Promise<Blob> {
   const keyBytes = Uint8Array.from(atob(key), c => c.charCodeAt(0));
-  const cryptoKey = await crypto.subtle.importKey("raw", keyBytes, LEGACY_ALGORITHM, false, ["decrypt"]);
+  const cryptoKey = await crypto.subtle.importKey("raw", keyBytes, ALGORITHM, false, ["decrypt"]);
   const ivBytes = Uint8Array.from(atob(iv), c => c.charCodeAt(0));
   const buffer = await encryptedBlob.arrayBuffer();
-  const decrypted = await crypto.subtle.decrypt({ name: LEGACY_ALGORITHM, iv: ivBytes }, cryptoKey, buffer);
+  const decrypted = await crypto.subtle.decrypt({ name: ALGORITHM, iv: ivBytes }, cryptoKey, buffer);
   return new Blob([decrypted], { type: "application/octet-stream" });
 }
