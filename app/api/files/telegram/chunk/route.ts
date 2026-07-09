@@ -95,11 +95,18 @@ export async function POST(req: NextRequest) {
 
   if (useEncryption && file.encryptionKey) {
     const key = Buffer.from(file.encryptionKey, "base64");
+    if (key.length !== 32) {
+      return NextResponse.json({ error: `Invalid key length: ${key.length}`, status: 500 });
+    }
     const nonceToUse = nonce ? Buffer.from(nonce, "base64") : generateNonceFromService();
     chunkNonce = nonceToUse.toString("base64");
     
-    const encrypted = encryptChunkWithNonce(chunkBuffer, nonceToUse, key);
-    encryptedChunk = encrypted;
+    try {
+      const encrypted = encryptChunkWithNonce(chunkBuffer, nonceToUse, key);
+      encryptedChunk = encrypted;
+    } catch (encErr) {
+      return NextResponse.json({ error: `Encryption failed: ${encErr instanceof Error ? encErr.message : String(encErr)}`, status: 500 });
+    }
     chunkPlaintextHash = plaintextHash || computeHash(chunkBuffer);
   } else {
     encryptedChunk = chunkBuffer;
