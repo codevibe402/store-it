@@ -15,14 +15,14 @@ async function getKeyFromPassword(password: string): Promise<CryptoKey> {
     "raw",
     encoder.encode(password),
     "PBKDF2",
-    false,
+    true,  // Must be extractable to derive extractable key
     ["deriveKey"]
   );
   return crypto.subtle.deriveKey(
     { name: "PBKDF2", salt: encoder.encode("storeit-telegram-salt"), iterations: 100000, hash: "SHA-256" },
     keyMaterial,
     { name: ALGORITHM, length: 256 },
-    false,
+    true,  // Must be extractable to export the key for server-side storage
     ["encrypt", "decrypt"]
   );
 }
