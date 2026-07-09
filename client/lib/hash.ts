@@ -27,10 +27,10 @@ export async function encryptChunk(chunk: Uint8Array, keyBase64: string, nonceBa
   const encryptedBuffer = await crypto.subtle.encrypt(
     { name: ALGORITHM, iv: nonce },
     cryptoKey,
-    chunk
+    Buffer.from(chunk)
   );
   
-  return encryptedBuffer;
+  return new Uint8Array(encryptedBuffer);
 }
 
 export async function decryptChunk(encryptedChunk: Uint8Array, keyBase64: string, nonceBase64: string): Promise<Uint8Array> {
@@ -41,10 +41,10 @@ export async function decryptChunk(encryptedChunk: Uint8Array, keyBase64: string
   const decryptedBuffer = await crypto.subtle.decrypt(
     { name: ALGORITHM, iv: nonce },
     cryptoKey,
-    encryptedChunk
+    Buffer.from(encryptedChunk)
   );
   
-  return decryptedBuffer;
+  return new Uint8Array(decryptedBuffer);
 }
 
 // Legacy functions - kept for compatibility but deprecated
