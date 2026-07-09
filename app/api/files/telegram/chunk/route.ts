@@ -129,12 +129,16 @@ export async function POST(req: NextRequest) {
       const { messageId, fileId: tgFileId } = await sendDocument(blob, filename);
 
       try {
+        const finalNonce = chunkNonce || crypto.randomBytes(12).toString("base64");
+        if (!finalNonce) {
+          throw new Error("Failed to generate nonce for chunk");
+        }
         await TelegramChunk.create({
           fileId,
           chunkIndex,
           hash: encryptedHash,
           plaintextHash: chunkPlaintextHash,
-          nonce: chunkNonce || crypto.randomBytes(12).toString("base64"),
+          nonce: finalNonce,
           size: encryptedChunk.length,
           telegramMessageId: messageId,
           telegramFileId: tgFileId,
