@@ -95,7 +95,6 @@ export async function POST(req: NextRequest) {
   let chunkPlaintextHash: string;
 
   if (useEncryption && file.encryptionKey) {
-    console.log('[telegram/chunk] Using encryption, key length:', file.encryptionKey?.length);
     const key = Buffer.from(file.encryptionKey, "base64");
     if (key.length !== 32) {
       return NextResponse.json({ error: `Invalid key length: ${key.length}`, status: 500 });
@@ -111,7 +110,6 @@ export async function POST(req: NextRequest) {
     }
     chunkPlaintextHash = plaintextHash || computeHash(chunkBuffer);
   } else {
-    console.log('[telegram/chunk] No encryption, useEncryption:', useEncryption, 'encryptionKey:', file.encryptionKey);
     encryptedChunk = chunkBuffer;
     chunkNonce = nonce || crypto.randomBytes(12).toString("base64");
     chunkPlaintextHash = plaintextHash || hash;
