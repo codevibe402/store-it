@@ -3,6 +3,7 @@ import { getAuthUser } from "@/server/auth/auth";
 import connectDB from "@/adapters/database/mongoose";
 import File from "@/adapters/database/models/File";
 import User from "@/adapters/database/models/User";
+import EncryptionKey from "@/adapters/database/models/EncryptionKey";
 
 const CHUNK_SIZE = 4 * 1024 * 1024;
 
@@ -12,9 +13,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { filename, mimeType, size, hash, folderId } = await req.json();
+  const body = await req.json();
+  const { filename, mimeType, size, hash, folderId = null, fileId, useEncryption } = body as {
+    filename: string;
+    mimeType: string;
+    size: number;
+    hash: string;
+    folderId: string | null;
+    fileId?: string;
+    useEncryption?: boolean;
+  };
+
   if (!filename || !size || !hash) {
-    return NextResponse.json({ error: "filename, size, and hash are required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "filename, size, and hash are required" },
+      { status: 400 }
+    );
   }
 
   await connectDB();
@@ -24,45 +38,90 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  if (!user.hasEnoughStorage(size)) {
-    return NextResponse.json({ error: "Storage limit exceeded" }, { status: 413 });
-  }
+  let file;
 
-  const existing = await File.findOne({ owner_id: user._id, hash, backend: "telegram" });
-  if (existing) {
-    if (existing.status === "uploaded") {
-      return NextResponse.json({ error: "Duplicate file", existingFile: existing }, { status: 409 });
-    }
-    return NextResponse.json({
-      fileId: existing._id.toString(),
-      totalChunks: existing.totalChunks,
-      chunkSize: existing.chunkSize,
-      resuming: true,
+  if (fileId) {
+    file = await File.findOne({
+      _id: fileId,
+      owner_id: user._id,
+      status: { $in: ["pending", "uploading", "paused"] },
+      backend: "telegram",
     });
+
+    if (!file) {
+      return NextResponse.json(
+        { error: "Upload not found or not in valid state" },
+        { status: 404 }
+      );
+    }
+
+    if (file.hash !== hash) {
+      return NextResponse.json(
+        { error: "File hash mismatch" },
+        { status: 409 }
+      );
+    }
+  } else {
+    if (!user.hasEnoughStorage(size)) {
+      return NextResponse.json({ error: "Storage limit exceeded" }, { status: 413 });
+    }
+
+    const existingFile = await File.findOne({
+      hash,
+      owner_id: user._id,
+      status: "uploaded",
+      backend: "telegram",
+    });
+
+    if (existingFile) {
+      return NextResponse.json(
+        { error: "Duplicate file", existingFile },
+        { status: 409 }
+      );
+    }
+
+    const totalChunks = Math.ceil(size / CHUNK_SIZE);
+    const key = useEncryption ? generateEncryptionKey() : null;
+    const keyBase64 = key?.toString("base64");
+
+    file = await File.create({
+      filename,
+      hash,
+      size,
+      mimetype: mimeType || "application/octet-stream",
+      owner_id: user._id,
+      owner_email: user.email,
+      storageUrl: `telegram/${user._id}/${Date.now()}-${filename}`,
+      folderId: folderId ?? null,
+      folders_id: folderId ?? null,
+      backend: "telegram",
+      totalChunks,
+      chunkSize: CHUNK_SIZE,
+      status: "pending",
+      encryptionKey: keyBase64,
+    });
+
+    if (key) {
+      await EncryptionKey.create({
+        fileId: file._id,
+        keyBase64: keyBase64,
+        algorithm: "aes-256-gcm",
+      });
+    }
   }
 
-  const totalChunks = Math.ceil(size / CHUNK_SIZE);
-  const key = `telegram/${user._id}/${Date.now()}-${filename}`;
-
-  const file = await File.create({
-    filename,
-    hash,
-    size,
-    mimetype: mimeType || "application/octet-stream",
-    owner_id: user._id,
-    owner_email: user.email,
-    storageUrl: key,
-    folderId: folderId ?? null,
-    folders_id: folderId ?? null,
-    backend: "telegram",
-    totalChunks,
-    chunkSize: CHUNK_SIZE,
-    status: "pending",
-  });
+  const totalChunks = file.totalChunks || Math.ceil(size / CHUNK_SIZE);
 
   return NextResponse.json({
     fileId: file._id.toString(),
     totalChunks,
-    chunkSize: CHUNK_SIZE,
+    chunkSize: file.chunkSize || CHUNK_SIZE,
+    encrypt: useEncryption ?? false,
+    encryptionKey: file.encryptionKey,
   });
+}
+
+function generateEncryptionKey(): Buffer {
+  const crypto = require("crypto");
+  return crypto.randomBytes(32);
 }

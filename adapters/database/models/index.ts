@@ -7,3 +7,4 @@ export { default as TelegramChunk } from './TelegramChunk';
 export { default as FolderShare } from './Foldershare';
 export { default as FileShare } from './Fileshare';
 export { default as RefreshToken } from './RefreshToken';
+export { default as EncryptionKey } from './EncryptionKey';

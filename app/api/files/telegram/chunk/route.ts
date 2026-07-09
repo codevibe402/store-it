@@ -4,6 +4,8 @@ import connectDB from "@/adapters/database/mongoose";
 import File from "@/adapters/database/models/File";
 import TelegramChunk from "@/adapters/database/models/TelegramChunk";
 import { sendDocument, deleteMessage } from "@/adapters/storage/telegram";
+import { encryptChunk, generateNonce } from "@/server/services/encryptionService";
+import { computeHash } from "@/server/lib/hash";
 
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -24,7 +26,10 @@ export async function POST(req: NextRequest) {
   const fileId = form.get("fileId") as string;
   const chunkIndexStr = form.get("chunkIndex") as string;
   const hash = form.get("hash") as string;
+  const plaintextHash = form.get("plaintextHash") as string;
+  const nonce = form.get("nonce") as string;
   const chunkFile = form.get("chunk") as Blob | null;
+  const useEncryption = form.get("useEncryption") === "true";
 
   if (!fileId || !chunkIndexStr || !hash || !chunkFile) {
     return NextResponse.json({ error: "fileId, chunkIndex, hash, and chunk are required" }, { status: 400 });
@@ -59,6 +64,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: "Chunk already uploaded" });
   }
 
+  const chunkBuffer = Buffer.from(await chunkFile.arrayBuffer());
+  
+  let encryptedChunk: Buffer;
+  let chunkNonce: string;
+  let chunkPlaintextHash: string;
+
+  if (useEncryption && file.encryptionKey) {
+    const key = Buffer.from(file.encryptionKey, "base64");
+    const nonceToUse = nonce ? Buffer.from(nonce, "base64") : generateNonce();
+    chunkNonce = nonceToUse.toString("base64");
+    
+    const { encrypted, nonce: generatedNonce, authTag } = encryptChunk(chunkBuffer, key);
+    encryptedChunk = Buffer.concat([generatedNonce, encrypted, authTag]);
+    chunkPlaintextHash = plaintextHash || computeHash(chunkBuffer);
+  } else {
+    encryptedChunk = chunkBuffer;
+    chunkNonce = nonce || "";
+    chunkPlaintextHash = plaintextHash || hash;
+  }
+
+  const encryptedHash = computeHash(encryptedChunk);
   const filename = `${file.filename}.part${chunkIndex}`;
 
   let lastError: Error | null = null;
@@ -66,14 +92,17 @@ export async function POST(req: NextRequest) {
 
   for (let attempt = 0; attempt <= delays.length; attempt++) {
     try {
-      const { messageId, fileId: tgFileId } = await sendDocument(chunkFile, filename);
+      const blob = new Blob([new Uint8Array(encryptedChunk)], { type: "application/octet-stream" });
+      const { messageId, fileId: tgFileId } = await sendDocument(blob, filename);
 
       try {
         await TelegramChunk.create({
           fileId,
           chunkIndex,
-          hash,
-          size: chunkFile.size,
+          hash: encryptedHash,
+          plaintextHash: chunkPlaintextHash,
+          nonce: chunkNonce,
+          size: encryptedChunk.length,
           telegramMessageId: messageId,
           telegramFileId: tgFileId,
         });
@@ -86,7 +115,14 @@ export async function POST(req: NextRequest) {
         throw dbErr;
       }
 
-      return NextResponse.json({ messageId, fileId: tgFileId });
+      return NextResponse.json({ 
+        messageId, 
+        fileId: tgFileId,
+        chunkIndex,
+        hash: encryptedHash,
+        plaintextHash: chunkPlaintextHash,
+        nonce: chunkNonce,
+      });
     } catch (err: any) {
       lastError = err;
       if (err.code === 429) {

@@ -22,6 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         result.mimetype,
         result.filename,
         result.disposition,
+        result.encryptionKeyBase64,
       );
     }
 

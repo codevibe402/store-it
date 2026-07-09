@@ -4,7 +4,9 @@ import connectDB from "@/adapters/database/mongoose";
 import File from "@/adapters/database/models/File";
 import FileVersion from "@/adapters/database/models/FileVersion";
 import TelegramChunk from "@/adapters/database/models/TelegramChunk";
+import EncryptionKey from "@/adapters/database/models/EncryptionKey";
 import User from "@/adapters/database/models/User";
+import { deleteMessage } from "@/adapters/storage/telegram";
 
 export async function POST(req: NextRequest) {
   const user = await getAuthUser();
@@ -12,7 +14,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { fileId } = await req.json();
+  const body = await req.json();
+  const { fileId, encryptionIv, encryptionKey } = body as {
+    fileId: string;
+    encryptionIv?: string;
+    encryptionKey?: string;
+  };
+
   if (!fileId) {
     return NextResponse.json({ error: "fileId is required" }, { status: 400 });
   }
@@ -23,9 +31,11 @@ export async function POST(req: NextRequest) {
   if (!file) {
     return NextResponse.json({ error: "File not found" }, { status: 404 });
   }
+
   if (file.owner_email !== user.email) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
   if (file.backend !== "telegram") {
     return NextResponse.json({ error: "File is not stored in Telegram" }, { status: 409 });
   }
@@ -38,31 +48,37 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (file.status !== "uploaded") {
-    file.status = "uploaded";
-    await file.save();
-
-    const version = await FileVersion.create({
-      file_id: file._id,
-      version: 1,
-      backend: "telegram",
-      storageUrl: file.storageUrl,
-      hash: file.hash,
-      size: file.size,
-      mimetype: file.mimetype,
-      createdBy: file.owner_id,
-    });
-
-    file.currentVersionId = version._id;
-    await file.save();
-
-    await TelegramChunk.updateMany(
-      { fileId: file._id },
-      { $set: { versionId: version._id } },
-    );
-
-    await User.findByIdAndUpdate(file.owner_id, { $inc: { storageused: file.size } });
+  if (file.status === "uploaded") {
+    return NextResponse.json({ file, alreadyUploaded: true });
   }
 
-  return NextResponse.json({ file });
+  file.status = "uploaded";
+  await file.save();
+
+  const userDoc = await User.findById(file.owner_id);
+  if (userDoc) {
+    userDoc.storageused = (userDoc.storageused || 0) + file.size;
+    await userDoc.save();
+  }
+
+  const version = await FileVersion.create({
+    file_id: file._id,
+    version: 1,
+    backend: "telegram",
+    storageUrl: file.storageUrl,
+    hash: file.hash,
+    size: file.size,
+    mimetype: file.mimetype,
+    createdBy: file.owner_id,
+  });
+
+  file.currentVersionId = version._id;
+  await file.save();
+
+  await TelegramChunk.updateMany(
+    { fileId: file._id },
+    { $set: { versionId: version._id } },
+  );
+
+  return NextResponse.json({ file, versionId: version._id.toString() });
 }

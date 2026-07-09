@@ -19,6 +19,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       result.size,
       result.mimetype,
       result.filename,
+      "attachment",
+      result.encryptionKeyBase64,
     );
   } catch (err) {
     if (err instanceof ServiceError) return NextResponse.json({ error: err.message }, { status: err.status });

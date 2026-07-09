@@ -6,11 +6,13 @@ import connectDB from "@/adapters/database/mongoose";
 import { s3, BUCKET } from "@/adapters/storage/s3";
 import File from "@/adapters/database/models/File";
 import FileVersion from "@/adapters/database/models/FileVersion";
+import TelegramChunk from "@/adapters/database/models/TelegramChunk";
 import FileShare from "@/adapters/database/models/Fileshare";
 import FolderShare from "@/adapters/database/models/Foldershare";
 import Folder from "@/adapters/database/models/Folder";
 import User from "@/adapters/database/models/User";
 import Permission from "@/adapters/database/models/Permission";
+import EncryptionKey from "@/adapters/database/models/EncryptionKey";
 import { createS3DownloadUrl, createTelegramDownloadStream } from "@/server/lib/download";
 import { createHash } from "crypto";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
@@ -101,7 +103,15 @@ export async function getSharedFileByToken(token: string, versionId?: string | n
   if (!version) throw new ServiceError("Version not found", 404);
 
   if (version.backend === "telegram") {
-    return { kind: "stream" as const, versionId: version._id.toString(), size: version.size, mimetype: version.mimetype, filename: file.filename };
+    const encryptionKey = await EncryptionKey.findOne({ fileId: file._id }).lean();
+    return { 
+      kind: "stream" as const, 
+      versionId: version._id.toString(), 
+      size: version.size, 
+      mimetype: version.mimetype, 
+      filename: file.filename,
+      encryptionKeyBase64: encryptionKey?.keyBase64,
+    };
   }
 
   const url = await createS3DownloadUrl(version.storageUrl, file.filename, version.mimetype);
@@ -231,7 +241,15 @@ export async function getSharedFileDownload(token: string, fileId: string) {
   }
 
   if (version.backend === "telegram") {
-    return { kind: "stream" as const, versionId: version._id.toString(), size: version.size, mimetype: version.mimetype, filename: file.filename };
+    const encryptionKey = await EncryptionKey.findOne({ fileId: file._id }).lean();
+    return { 
+      kind: "stream" as const, 
+      versionId: version._id.toString(), 
+      size: version.size, 
+      mimetype: version.mimetype, 
+      filename: file.filename,
+      encryptionKeyBase64: encryptionKey?.keyBase64,
+    };
   }
 
   const url = await createS3DownloadUrl(version.storageUrl, file.filename, version.mimetype);

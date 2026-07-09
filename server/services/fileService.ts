@@ -4,12 +4,13 @@ import connectDB from "@/adapters/database/mongoose";
 import { BUCKET, s3 } from "@/adapters/storage/s3";
 import File from "@/adapters/database/models/File";
 import Folder from "@/adapters/database/models/Folder";
-import FileVersion from "@/adapters/database/models/FileVersion";
+import FileVersionModel from "@/adapters/database/models/FileVersion";
 import TelegramChunk from "@/adapters/database/models/TelegramChunk";
 import User from "@/adapters/database/models/User";
 import { deleteMessage } from "@/adapters/storage/telegram";
 import { createS3DownloadUrl, createTelegramDownloadStream } from "@/server/lib/download";
 import { ServiceError } from "./shareService";
+import EncryptionKeyModel from "@/adapters/database/models/EncryptionKey";
 
 export async function moveFile(userId: string, fileId: string, folderId: string | null) {
   if (!ObjectId.isValid(fileId)) throw new ServiceError("Invalid file id", 400);
@@ -48,6 +49,8 @@ export async function deleteFile(userId: string, fileId: string) {
     await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: file.storageUrl }));
   }
 
+  await EncryptionKeyModel.deleteOne({ fileId: file._id });
+  await FileVersionModel.deleteMany({ file_id: file._id });
   await File.deleteOne({ _id: fileId, owner_id: userId });
   return file.filename;
 }
@@ -77,12 +80,13 @@ export async function getFileDownload(userId: string, fileId: string, preview: b
 
   let version;
   if (versionId) {
-    version = await FileVersion.findById(versionId).lean();
+    version = await FileVersionModel.findById(versionId).lean();
   } else if (file.currentVersionId) {
-    version = await FileVersion.findById(file.currentVersionId).lean();
+    version = await FileVersionModel.findById(file.currentVersionId).lean();
   }
 
   if (version?.backend === "telegram") {
+    const encryptionKey = await EncryptionKeyModel.findOne({ fileId: file._id }).lean();
     return {
       kind: "stream" as const,
       versionId: version._id.toString(),
@@ -90,6 +94,7 @@ export async function getFileDownload(userId: string, fileId: string, preview: b
       mimetype: preview ? file.mimetype : version.mimetype,
       filename: file.filename,
       disposition: preview ? "inline" as const : "attachment" as const,
+      encryptionKeyBase64: encryptionKey?.keyBase64,
     };
   }
 
@@ -98,4 +103,21 @@ export async function getFileDownload(userId: string, fileId: string, preview: b
   const url = await createS3DownloadUrl(storageUrl, file.filename, file.mimetype, disposition as "inline" | "attachment");
 
   return { kind: "redirect" as const, url };
+}
+
+export async function checkDuplicateFile(
+  userId: string,
+  hash: string,
+  backend: "s3" | "telegram" = "s3"
+) {
+  await connectDB();
+
+  const file = await File.findOne({
+    hash,
+    owner_id: userId,
+    status: "uploaded",
+    backend,
+  }).lean();
+
+  return file;
 }

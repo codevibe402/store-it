@@ -30,6 +30,8 @@ const FileSchema = new Schema({
   fallbackCompletedAt: { type: Date, default: null },
   cleanupWarnings: [{ type: String }],
   currentVersionId: { type: Schema.Types.ObjectId, default: null },
+  encryptionIv: { type: String, default: null },
+  encryptionKey: { type: String, default: null },
 }, { timestamps: true });
 
 FileSchema.index({ owner_id: 1, hash: 1, status: 1 });

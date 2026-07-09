@@ -3,17 +3,15 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { s3, BUCKET } from "@/adapters/storage/s3";
 import { generateFileUrl, CDN_CONFIG } from "@/adapters/storage/cdn";
 import File from "@/adapters/database/models/File";
-import FileVersion from "@/adapters/database/models/FileVersion";
+import FileVersionModel from "@/adapters/database/models/FileVersion";
 import TelegramChunk from "@/adapters/database/models/TelegramChunk";
+import EncryptionKeyModel from "@/adapters/database/models/EncryptionKey";
 import { getFile, getFileDownloadUrl } from "@/adapters/storage/telegram";
+import { decryptChunk } from "@/server/services/decryptionService";
+import { parseNonce } from "@/server/lib/crypto";
+import { computeHash } from "@/server/lib/hash";
 
 const PREFETCH = 4;
-
-async function computeHash(data: Uint8Array): Promise<string> {
-  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(data.buffer as ArrayBuffer, data.byteOffset, data.byteLength))))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
 
 export async function createS3DownloadUrl(
   storageUrl: string,
@@ -55,6 +53,7 @@ export async function createTelegramDownloadStream(
   mimetype: string,
   filename: string,
   disposition: "inline" | "attachment" = "attachment",
+  encryptionKeyBase64?: string,
 ): Promise<Response> {
   const chunks = await TelegramChunk.find({ versionId }).sort({ chunkIndex: 1 }).lean();
   const totalChunks = chunks.length;
@@ -63,7 +62,11 @@ export async function createTelegramDownloadStream(
     return new Response("No chunks found for this version", { status: 404 });
   }
 
-  const fetchQueue = new Map<number, Promise<Uint8Array>>();
+  const encryptionKey = encryptionKeyBase64
+    ? Buffer.from(encryptionKeyBase64, "base64")
+    : null;
+
+  const fetchQueue = new Map<number, Promise<Buffer>>();
 
   function startFetch(index: number) {
     if (index >= totalChunks || fetchQueue.has(index)) return;
@@ -75,7 +78,8 @@ export async function createTelegramDownloadStream(
         const url = getFileDownloadUrl(filePath);
         const res = await fetch(url);
         if (!res.ok) throw new Error(`Failed to download chunk ${index}`);
-        return new Uint8Array(await res.arrayBuffer());
+        const arrayBuffer = await res.arrayBuffer();
+        return Buffer.from(arrayBuffer);
       })(),
     );
   }
@@ -85,18 +89,31 @@ export async function createTelegramDownloadStream(
   let idx = 0;
 
   const stream = new ReadableStream({
-    async pull(controller) {
+    async pull(controller: ReadableStreamDefaultController) {
       if (idx >= totalChunks) { controller.close(); return; }
       startFetch(idx + PREFETCH);
       try {
         const data = await fetchQueue.get(idx)!;
         fetchQueue.delete(idx);
-        const actualHash = await computeHash(data);
-        if (actualHash !== chunks[idx].hash) {
-          controller.error(new Error(`Chunk ${idx} hash mismatch`));
-          return;
+
+        const nonce = chunks[idx].nonce ? parseNonce(chunks[idx].nonce) : null;
+
+        let decrypted: Buffer;
+        if (encryptionKey && nonce && nonce.length > 0) {
+          decrypted = decryptChunk(data, nonce, encryptionKey);
+        } else {
+          decrypted = data;
         }
-        controller.enqueue(data);
+
+        if (chunks[idx].hash) {
+          const computedHash = computeHash(data);
+          if (computedHash !== chunks[idx].hash) {
+            controller.error(new Error(`Chunk ${idx} integrity check failed`));
+            return;
+          }
+        }
+
+        controller.enqueue(new Uint8Array(decrypted.buffer, decrypted.byteOffset, decrypted.byteLength));
         idx++;
       } catch (err) {
         controller.error(err as Error);
@@ -122,19 +139,22 @@ export async function createVersionDownloadResponse(
   if (!file) return new Response("File not found", { status: 404 });
 
   const version = versionId
-    ? await FileVersion.findById(versionId).lean()
+    ? await FileVersionModel.findById(versionId).lean()
     : file.currentVersionId
-      ? await FileVersion.findById(file.currentVersionId).lean()
+      ? await FileVersionModel.findById(file.currentVersionId).lean()
       : null;
 
   if (!version) return new Response("Version not found", { status: 404 });
 
   if (version.backend === "telegram") {
+    const encryptionKey = await EncryptionKeyModel.findOne({ fileId }).lean();
     return createTelegramDownloadStream(
       version._id.toString(),
       version.size,
       version.mimetype,
       file.filename,
+      "attachment",
+      encryptionKey?.keyBase64,
     );
   }
 

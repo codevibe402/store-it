@@ -5,6 +5,8 @@ const TelegramChunkSchema = new mongoose.Schema({
   versionId: { type: mongoose.Schema.Types.ObjectId, ref: "FileVersion", default: null },
   chunkIndex: { type: Number, required: true },
   hash: { type: String, required: true },
+  plaintextHash: { type: String, required: true },
+  nonce: { type: String, required: true },
   size: { type: Number, required: true },
   telegramMessageId: { type: Number, required: true },
   telegramFileId: { type: String, required: true },
