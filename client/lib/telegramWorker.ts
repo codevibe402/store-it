@@ -38,19 +38,27 @@ export interface TelegramChunkError extends Error {
 
 export async function resumeTelegramUpload(
   fileId: string,
-  file: File,
+  blob: Blob,
   onProgress: ProgressCallback,
   cancelRef: CancelPauseRef,
   pauseRef: CancelPauseRef,
   abortRef: AbortRef,
+  encryptionMetadata?: { iv: string; key: string },
 ): Promise<void> {
   const resumeRes = await fetch(`/api/files/telegram/${fileId}/resume`);
   const resumeData = resumeRes.ok ? await resumeRes.json() : null;
   const alreadyUploaded = new Set<number>(resumeData?.uploadedIndexes ?? []);
   let uploadedBytes = resumeData?.uploadedBytes ?? 0;
-  onProgress(Math.round((uploadedBytes / file.size) * 100));
+  const totalSize = blob.size;
+  
+  // Show initial progress (at least 1%) if nothing uploaded yet
+  if (uploadedBytes === 0) {
+    onProgress(1);
+  } else {
+    onProgress(Math.round((uploadedBytes / totalSize) * 100));
+  }
 
-  const totalChunks = Math.ceil(file.size / TELEGRAM_CHUNK_SIZE);
+  const totalChunks = Math.ceil(blob.size / TELEGRAM_CHUNK_SIZE);
   const controller = new AbortController();
   abortRef.current = controller;
   const signal = controller.signal;
@@ -64,7 +72,7 @@ export async function resumeTelegramUpload(
       if (alreadyUploaded.has(index)) continue;
 
       const start = index * TELEGRAM_CHUNK_SIZE;
-      const chunkBlob = file.slice(start, Math.min(start + TELEGRAM_CHUNK_SIZE, file.size));
+      const chunkBlob = blob.slice(start, Math.min(start + TELEGRAM_CHUNK_SIZE, blob.size));
       const chunkHash = await getChunkHash(chunkBlob);
 
       const formData = new FormData();
@@ -85,7 +93,7 @@ export async function resumeTelegramUpload(
           if (cancelRef.current || pauseRef.current || signal.aborted) {
             throw { isCancelled: true };
           }
-          if (!res.ok) {
+if (!res.ok) {
             const errBody = await res.json().catch(() => ({})) as Record<string, unknown>;
             const err = new Error(`Status ${res.status}`) as TelegramChunkError;
             err.canFallbackToS3 = errBody.canFallbackToS3 === true;
@@ -93,8 +101,10 @@ export async function resumeTelegramUpload(
           }
           success = true;
           uploadedBytes += chunkBlob.size;
-          onProgress(Math.round((uploadedBytes / file.size) * 100));
-        } catch (err: unknown) {
+          const progress = Math.round((uploadedBytes / totalSize) * 100);
+          // Ensure progress is at least 1% for first chunk
+          onProgress(Math.max(1, progress));
+         } catch (err: unknown) {
           if (cancelRef.current || pauseRef.current || signal.aborted) {
             throw { isCancelled: true };
           }
@@ -126,7 +136,7 @@ export async function resumeTelegramUpload(
 
   const completeRes = await fetch("/api/files/telegram/complete", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileId }),
+    body: JSON.stringify({ fileId, encryptionIv: encryptionMetadata?.iv, encryptionKey: encryptionMetadata?.key }),
   });
   if (!completeRes.ok) throw new Error("Failed to complete Telegram upload");
 }
