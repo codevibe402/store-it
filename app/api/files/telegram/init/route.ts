@@ -4,6 +4,7 @@ import connectDB from "@/adapters/database/mongoose";
 import File from "@/adapters/database/models/File";
 import User from "@/adapters/database/models/User";
 import EncryptionKey from "@/adapters/database/models/EncryptionKey";
+import { generateEncryptionKey } from "@/server/lib/crypto";
 
 const CHUNK_SIZE = 4 * 1024 * 1024;
 
@@ -80,34 +81,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const totalChunks = Math.ceil(size / CHUNK_SIZE);
-    const key = useEncryption ? generateEncryptionKey() : null;
-    const keyBase64 = key?.toString("base64");
+const totalChunks = Math.ceil(size / CHUNK_SIZE);
+  const { base64: keyBase64 } = useEncryption ? generateEncryptionKey() : { base64: null as any };
 
-    file = await File.create({
-      filename,
-      hash,
-      size,
-      mimetype: mimeType || "application/octet-stream",
-      owner_id: user._id,
-      owner_email: user.email,
-      storageUrl: `telegram/${user._id}/${Date.now()}-${filename}`,
-      folderId: folderId ?? null,
-      folders_id: folderId ?? null,
-      backend: "telegram",
-      totalChunks,
-      chunkSize: CHUNK_SIZE,
-      status: "pending",
-      encryptionKey: keyBase64,
+  file = await File.create({
+    filename,
+    hash,
+    size,
+    mimetype: mimeType || "application/octet-stream",
+    owner_id: user._id,
+    owner_email: user.email,
+    storageUrl: `telegram/${user._id}/${Date.now()}-${filename}`,
+    folderId: folderId ?? null,
+    folders_id: folderId ?? null,
+    backend: "telegram",
+    totalChunks,
+    chunkSize: CHUNK_SIZE,
+    status: "pending",
+    encryptionKey: keyBase64,
+  });
+
+  if (keyBase64) {
+    await EncryptionKey.create({
+      fileId: file._id,
+      keyBase64,
+      algorithm: "aes-256-gcm",
     });
-
-    if (key) {
-      await EncryptionKey.create({
-        fileId: file._id,
-        keyBase64: keyBase64,
-        algorithm: "aes-256-gcm",
-      });
-    }
+  }
   }
 
   const totalChunks = file.totalChunks || Math.ceil(size / CHUNK_SIZE);
@@ -119,9 +119,4 @@ export async function POST(req: NextRequest) {
     encrypt: useEncryption ?? false,
     encryptionKey: file.encryptionKey,
   });
-}
-
-function generateEncryptionKey(): Buffer {
-  const crypto = require("crypto");
-  return crypto.randomBytes(32);
 }

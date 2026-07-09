@@ -4,7 +4,8 @@ import connectDB from "@/adapters/database/mongoose";
 import File from "@/adapters/database/models/File";
 import TelegramChunk from "@/adapters/database/models/TelegramChunk";
 import { sendDocument, deleteMessage } from "@/adapters/storage/telegram";
-import { encryptChunkWithNonce, generateNonce } from "@/server/services/encryptionService";
+import { encryptChunkWithNonce } from "@/server/services/encryptionService";
+import { generateNonce as generateNonceFromService } from "@/server/services/encryptionService";
 import { computeHash } from "@/server/lib/hash";
 
 const MAX_RETRIES = 3;
@@ -94,7 +95,7 @@ export async function POST(req: NextRequest) {
 
   if (useEncryption && file.encryptionKey) {
     const key = Buffer.from(file.encryptionKey, "base64");
-    const nonceToUse = nonce ? Buffer.from(nonce, "base64") : generateNonce();
+    const nonceToUse = nonce ? Buffer.from(nonce, "base64") : generateNonceFromService();
     chunkNonce = nonceToUse.toString("base64");
     
     const encrypted = encryptChunkWithNonce(chunkBuffer, nonceToUse, key);
