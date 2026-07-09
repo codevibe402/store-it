@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
     chunkNonce = nonceToUse.toString("base64");
     
     const encrypted = encryptChunkWithNonce(chunkBuffer, nonceToUse, key);
-    encryptedChunk = Buffer.concat([nonceToUse, encrypted]);
+    encryptedChunk = encrypted;
     chunkPlaintextHash = plaintextHash || computeHash(chunkBuffer);
   } else {
     encryptedChunk = chunkBuffer;
