@@ -363,8 +363,6 @@ export default function FileUpload() {
   }
 
   async function telegramUpload(file: File, hash: string, onProgress: (pct: number) => void, onFileId?: (fileId: string) => void) {
-    const { encrypted, iv, key } = await encryptFile(file, hash);
-    
     const initRes = await fetch("/api/files/telegram/init", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -388,9 +386,7 @@ export default function FileUpload() {
     pauseRef.current = false;
 
     try {
-      await resumeTelegramUpload(fileId, encrypted, onProgress, cancelRef, pauseRef, abortRef, { iv, key });
-      
-      sessionStorage.setItem(`enc_${fileId}`, JSON.stringify({ iv, key }));
+      await resumeTelegramUpload(fileId, file, onProgress, cancelRef, pauseRef, abortRef);
     } catch (err: unknown) {
       const uploadError = err as TelegramChunkError;
       abortRef.current = null;
@@ -459,12 +455,7 @@ export default function FileUpload() {
       if (file.backend === "telegram") {
         const res = await fetch(`/api/files/telegram/${file._id}/download`);
         if (!res.ok) throw new Error("Telegram download failed");
-        let blob = await res.blob();
-        const iv = res.headers.get("X-Encryption-Iv");
-        const key = res.headers.get("X-Encryption-Key");
-        if (iv && key) {
-          blob = await decryptFile(blob, iv, key);
-        }
+        const blob = await res.blob();
         const blobUrl = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = blobUrl; a.download = file.filename; a.click();
