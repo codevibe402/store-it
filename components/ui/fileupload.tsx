@@ -8,7 +8,7 @@ import FileSearch from "./filesearch";
 import { storeFile, getFile, removeFile } from "@/client/lib/indexedDB";
 import { resumeHandleCache, resumeFileCache } from "@/client/lib/resumeCache";
 import { resumeTelegramUpload } from "@/client/lib/telegramWorker";
-import { getFileHash, encryptFile, decryptFile } from "@/client/lib/hash";
+import { getFileHash } from "@/client/lib/hash";
 import { resumeUpload, getFileForResume } from "@/app/resume/page";
 
 // -- Constants --
