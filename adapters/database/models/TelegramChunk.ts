@@ -16,4 +16,5 @@ TelegramChunkSchema.index({ fileId: 1, chunkIndex: 1 }, { unique: true });
 TelegramChunkSchema.index({ fileId: 1 });
 TelegramChunkSchema.index({ versionId: 1, chunkIndex: 1 });
 
-export default mongoose.models.TelegramChunk || mongoose.model("TelegramChunk", TelegramChunkSchema);
+delete mongoose.models.TelegramChunk;
+export default mongoose.model("TelegramChunk", TelegramChunkSchema);
