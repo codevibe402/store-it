@@ -8,7 +8,7 @@ import FileSearch from "./filesearch";
 import { storeFile, getFile, removeFile } from "@/client/lib/indexedDB";
 import { resumeHandleCache, resumeFileCache } from "@/client/lib/resumeCache";
 import { resumeTelegramUpload } from "@/client/lib/telegramWorker";
-import { getFileHash } from "@/client/lib/hash";
+import { getFileHash, encryptFile, decryptFile } from "@/client/lib/hash";
 import { resumeUpload, getFileForResume } from "@/app/resume/page";
 
 // -- Constants --
@@ -82,28 +82,29 @@ type TelegramChunkError = Error & {
 };
 
 // -- Utils --
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
+ function formatBytes(bytes: number): string {
+   if (bytes < 1024) return `${bytes} B`;
+   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+ }
 
 function getFileIcon(mimetype: string): string {
-  if (mimetype.startsWith("image/")) return "[IMG]";
-  if (mimetype.startsWith("video/")) return "[VID]";
-  if (mimetype.startsWith("audio/")) return "[AUD]";
-  if (mimetype.includes("pdf")) return "[PDF]";
-  if (mimetype.includes("zip") || mimetype.includes("compressed")) return "[ARC]";
-  if (mimetype.includes("word") || mimetype.includes("document")) return "[DOC]";
-  if (mimetype.includes("sheet") || mimetype.includes("excel")) return "[SHT]";
-  return "[FILE]";
-}
+   if (mimetype.startsWith("image/")) return "[IMG]";
+   if (mimetype.startsWith("video/")) return "[VID]";
+   if (mimetype.startsWith("audio/")) return "[AUD]";
+   if (mimetype.includes("pdf")) return "[PDF]";
+   if (mimetype.includes("zip") || mimetype.includes("compressed")) return "[ARC]";
+   if (mimetype.includes("word") || mimetype.includes("document")) return "[DOC]";
+   if (mimetype.includes("sheet") || mimetype.includes("excel")) return "[SHT]";
+   return "[FILE]";
+ }
+
 type UploadAction= 
-    | { type: "UPLOAD_START" }
-    | { type: "UPLOAD_PROGRESS"; progress: number }
-    | { type: "UPLOAD_SUCCESS" }
-    | { type: "UPLOAD_ERROR"; message: string };
+     | { type: "UPLOAD_START" }
+     | { type: "UPLOAD_PROGRESS"; progress: number }
+     | { type: "UPLOAD_SUCCESS" }
+     | { type: "UPLOAD_ERROR"; message: string };
 function reducer(state: uploadstate,action: UploadAction):uploadstate{
   switch(action.type){
     case "UPLOAD_START":
@@ -362,11 +363,14 @@ export default function FileUpload() {
   }
 
   async function telegramUpload(file: File, hash: string, onProgress: (pct: number) => void, onFileId?: (fileId: string) => void) {
+    const { encrypted, iv, key } = await encryptFile(file, hash);
+    
     const initRes = await fetch("/api/files/telegram/init", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         filename: file.name, size: file.size, hash,
         mimeType: file.type, folderId: currentFolderId,
+        useEncryption: true,
       }),
     });
     if (cancelRef.current) throw { isCancelled: true };
@@ -384,7 +388,9 @@ export default function FileUpload() {
     pauseRef.current = false;
 
     try {
-      await resumeTelegramUpload(fileId, file, onProgress, cancelRef, pauseRef, abortRef);
+      await resumeTelegramUpload(fileId, encrypted, onProgress, cancelRef, pauseRef, abortRef, { iv, key });
+      
+      sessionStorage.setItem(`enc_${fileId}`, JSON.stringify({ iv, key }));
     } catch (err: unknown) {
       const uploadError = err as TelegramChunkError;
       abortRef.current = null;
@@ -453,7 +459,12 @@ export default function FileUpload() {
       if (file.backend === "telegram") {
         const res = await fetch(`/api/files/telegram/${file._id}/download`);
         if (!res.ok) throw new Error("Telegram download failed");
-        const blob = await res.blob();
+        let blob = await res.blob();
+        const iv = res.headers.get("X-Encryption-Iv");
+        const key = res.headers.get("X-Encryption-Key");
+        if (iv && key) {
+          blob = await decryptFile(blob, iv, key);
+        }
         const blobUrl = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = blobUrl; a.download = file.filename; a.click();
