@@ -4,7 +4,7 @@ import connectDB from "@/adapters/database/mongoose";
 import File from "@/adapters/database/models/File";
 import TelegramChunk from "@/adapters/database/models/TelegramChunk";
 import { sendDocument, deleteMessage } from "@/adapters/storage/telegram";
-import { encryptChunk, generateNonce } from "@/server/services/encryptionService";
+import { encryptChunkWithNonce, generateNonce } from "@/server/services/encryptionService";
 import { computeHash } from "@/server/lib/hash";
 
 async function sleep(ms: number) {
@@ -75,8 +75,8 @@ export async function POST(req: NextRequest) {
     const nonceToUse = nonce ? Buffer.from(nonce, "base64") : generateNonce();
     chunkNonce = nonceToUse.toString("base64");
     
-    const { encrypted, nonce: generatedNonce, authTag } = encryptChunk(chunkBuffer, key);
-    encryptedChunk = Buffer.concat([generatedNonce, encrypted, authTag]);
+    const encrypted = encryptChunkWithNonce(chunkBuffer, nonceToUse, key);
+    encryptedChunk = Buffer.concat([nonceToUse, encrypted]);
     chunkPlaintextHash = plaintextHash || computeHash(chunkBuffer);
   } else {
     encryptedChunk = chunkBuffer;
@@ -131,9 +131,9 @@ export async function POST(req: NextRequest) {
           continue;
         }
       } else {
-        console.error(`[telegram/chunk] Chunk ${chunkIndex} (attempt ${attempt}):`, err?.message || err);
+        console.error(`[telegram/chunk] Chunk ${chunkIndex} (attempt ${attempt}):`, err);
         return NextResponse.json(
-          { error: `Telegram upload failed: ${err?.message || "Unknown error"}` },
+          { error: `Telegram upload failed: ${err?.message || String(err)}` },
           { status: 500 },
         );
       }
