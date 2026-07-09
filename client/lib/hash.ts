@@ -71,10 +71,12 @@ async function _getKeyFromPassword(password: string): Promise<CryptoKey> {
 /** @deprecated Use generateEncryptionKey() + encryptChunk() instead */
 export async function encryptFile(file: File, _password: string): Promise<{ encrypted: Blob; iv: string; key: string }> {
   const { key, iv } = await generateEncryptionKey();
+  const keyBytes = Uint8Array.from(atob(key), c => c.charCodeAt(0));
+  const ivBytes = Uint8Array.from(atob(iv), c => c.charCodeAt(0));
   const buffer = await file.arrayBuffer();
   const encryptedBuffer = await crypto.subtle.encrypt(
-    { name: ALGORITHM, iv: new Uint8Array(atob(iv).split("").map(c => c.charCodeAt(0))) },
-    await crypto.subtle.importKey("raw", new Uint8Array(atob(key).split("").map(c => c.charCodeAt(0))), ALGORITHM, false, ["encrypt"]),
+    { name: ALGORITHM, iv: ivBytes },
+    await crypto.subtle.importKey("raw", keyBytes, ALGORITHM, false, ["encrypt"]),
     buffer
   );
   const encrypted = new Blob([encryptedBuffer], { type: "application/octet-stream" });
