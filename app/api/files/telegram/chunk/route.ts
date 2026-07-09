@@ -94,12 +94,15 @@ export async function POST(req: NextRequest) {
   let chunkNonce: string;
   let chunkPlaintextHash: string;
 
+  // Always generate a nonce to satisfy the schema requirement
+  const nonceValue = nonce || crypto.randomBytes(12).toString("base64");
+
   if (useEncryption && file.encryptionKey) {
     const key = Buffer.from(file.encryptionKey, "base64");
     if (key.length !== 32) {
       return NextResponse.json({ error: `Invalid key length: ${key.length}`, status: 500 });
     }
-    const nonceToUse = nonce ? Buffer.from(nonce, "base64") : generateNonceFromService();
+    const nonceToUse = nonce ? Buffer.from(nonce, "base64") : crypto.randomBytes(12);
     chunkNonce = nonceToUse.toString("base64");
     
     try {
@@ -111,7 +114,7 @@ export async function POST(req: NextRequest) {
     chunkPlaintextHash = plaintextHash || computeHash(chunkBuffer);
   } else {
     encryptedChunk = chunkBuffer;
-    chunkNonce = nonce || crypto.randomBytes(12).toString("base64");
+    chunkNonce = nonceValue;
     chunkPlaintextHash = plaintextHash || hash;
   }
 
@@ -131,7 +134,7 @@ export async function POST(req: NextRequest) {
           chunkIndex,
           hash: encryptedHash,
           plaintextHash: chunkPlaintextHash,
-          nonce: chunkNonce,
+          nonce: chunkNonce || crypto.randomBytes(12).toString("base64"),
           size: encryptedChunk.length,
           telegramMessageId: messageId,
           telegramFileId: tgFileId,
