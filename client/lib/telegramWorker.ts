@@ -80,6 +80,7 @@ export async function resumeTelegramUpload(
       formData.append("chunkIndex", String(index));
       formData.append("hash", chunkHash);
       formData.append("chunk", chunkBlob);
+      formData.append("useEncryption", "true");
 
       let success = false;
       for (let attempt = 0; attempt < 3 && !success; attempt++) {
