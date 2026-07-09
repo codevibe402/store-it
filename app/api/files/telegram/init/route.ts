@@ -81,33 +81,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
-const totalChunks = Math.ceil(size / CHUNK_SIZE);
-  const { base64: keyBase64 } = useEncryption ? generateEncryptionKey() : { base64: null as any };
+    const totalChunks = Math.ceil(size / CHUNK_SIZE);
+    const { base64: keyBase64 } = useEncryption ? generateEncryptionKey() : { base64: null as any };
 
-  file = await File.create({
-    filename,
-    hash,
-    size,
-    mimetype: mimeType || "application/octet-stream",
-    owner_id: user._id,
-    owner_email: user.email,
-    storageUrl: `telegram/${user._id}/${Date.now()}-${filename}`,
-    folderId: folderId ?? null,
-    folders_id: folderId ?? null,
-    backend: "telegram",
-    totalChunks,
-    chunkSize: CHUNK_SIZE,
-    status: "pending",
-    encryptionKey: keyBase64,
-  });
-
-  if (keyBase64) {
-    await EncryptionKey.create({
-      fileId: file._id,
-      keyBase64,
-      algorithm: "aes-256-gcm",
+    file = await File.create({
+      filename,
+      hash,
+      size,
+      mimetype: mimeType || "application/octet-stream",
+      owner_id: user._id,
+      owner_email: user.email,
+      storageUrl: `telegram/${user._id}/${Date.now()}-${filename}`,
+      folderId: folderId ?? null,
+      folders_id: folderId ?? null,
+      backend: "telegram",
+      totalChunks,
+      chunkSize: CHUNK_SIZE,
+      status: "pending",
+      encryptionKey: keyBase64,
     });
-  }
+
+    if (keyBase64) {
+      await EncryptionKey.create({
+        fileId: file._id,
+        keyBase64,
+        algorithm: "aes-256-gcm",
+      });
+    }
   }
 
   const totalChunks = file.totalChunks || Math.ceil(size / CHUNK_SIZE);
