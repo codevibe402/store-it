@@ -7,6 +7,7 @@ import { sendDocument, deleteMessage } from "@/adapters/storage/telegram";
 import { encryptChunkWithNonce } from "@/server/services/encryptionService";
 import { generateNonce as generateNonceFromService } from "@/server/services/encryptionService";
 import { computeHash } from "@/server/lib/hash";
+import crypto from "crypto";
 
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [1000, 2000, 4000];
@@ -110,7 +111,7 @@ export async function POST(req: NextRequest) {
     chunkPlaintextHash = plaintextHash || computeHash(chunkBuffer);
   } else {
     encryptedChunk = chunkBuffer;
-    chunkNonce = nonce || "";
+    chunkNonce = nonce || crypto.randomBytes(12).toString("base64");
     chunkPlaintextHash = plaintextHash || hash;
   }
 
