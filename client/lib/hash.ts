@@ -27,7 +27,7 @@ export async function encryptChunk(chunk: Uint8Array, keyBase64: string, nonceBa
   const encryptedBuffer = await crypto.subtle.encrypt(
     { name: ALGORITHM, iv: nonce },
     cryptoKey,
-    Buffer.from(chunk)
+    chunk.slice()
   );
   
   return new Uint8Array(encryptedBuffer);
@@ -41,7 +41,7 @@ export async function decryptChunk(encryptedChunk: Uint8Array, keyBase64: string
   const decryptedBuffer = await crypto.subtle.decrypt(
     { name: ALGORITHM, iv: nonce },
     cryptoKey,
-    Buffer.from(encryptedChunk)
+    encryptedChunk.slice()
   );
   
   return new Uint8Array(decryptedBuffer);
