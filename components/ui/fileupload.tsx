@@ -313,13 +313,16 @@ export default function FileUpload() {
       });
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({ error: "S3 fallback upload failed" }));
+        if (errBody.error === "Duplicate file") {
+          throw { isDuplicate: true, existingFile: errBody.existingFile };
+        }
         throw new Error(errBody.error || "S3 fallback upload failed");
       }
       onProgress(100);
       return res.json();
     }
 
-    const initRes = await fetch("/api/files/upload/multipart/init", {
+    const initRes = await fetch(`/api/files/fallback-to-s3/init`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         filename: file.name, mimeType: file.type, size: file.size, hash, fileId,
@@ -327,6 +330,9 @@ export default function FileUpload() {
     });
     if (!initRes.ok) {
       const errBody = await initRes.json().catch(() => ({ error: "Failed to init S3 multipart fallback" }));
+      if (errBody.error === "Duplicate file") {
+        throw { isDuplicate: true, existingFile: errBody.existingFile };
+      }
       throw new Error(errBody.error || "Failed to init S3 multipart fallback");
     }
     const { uploadId, key, totalParts } = await initRes.json();
@@ -403,6 +409,9 @@ export default function FileUpload() {
           });
           if (!fallbackRes.ok) {
             const fbErr = await fallbackRes.json().catch(() => ({ error: "Fallback failed" }));
+            if (fbErr.error === "Duplicate file") {
+              throw { isDuplicate: true, existingFile: fbErr.existingFile };
+            }
             throw new Error(fbErr.error || "Fallback to S3 failed");
           }
           onProgress(0);
@@ -410,7 +419,13 @@ export default function FileUpload() {
           queryClient.invalidateQueries({ queryKey: ["dashboard"] });
           return;
         } catch (fallbackErr: unknown) {
-          const message = fallbackErr instanceof Error ? fallbackErr.message : "Unknown fallback error";
+          const fallbackError = fallbackErr as UploadError;
+          if (fallbackError?.isDuplicate) {
+            setDuplicateFile(fallbackError.existingFile ?? null);
+            setToast({ msg: "This file already exists in your storage.", type: "warn" });
+            return;
+          }
+          const message = fallbackError instanceof Error ? fallbackError.message : "Unknown fallback error";
           throw new Error(`Telegram upload failed and S3 fallback also failed: ${message}`);
         }
       }

@@ -49,6 +49,18 @@ export async function POST(
     );
   }
 
+  const existingUpload = await File.findOne({
+    hash: file.hash,
+    owner_id: user._id,
+    status: "uploaded",
+  });
+  if (existingUpload) {
+    return NextResponse.json(
+      { error: "Duplicate file", existingFile: existingUpload },
+      { status: 409 },
+    );
+  }
+
   const chunks = await TelegramChunk.find({ fileId: id });
   const cleanupWarnings: string[] = [];
 

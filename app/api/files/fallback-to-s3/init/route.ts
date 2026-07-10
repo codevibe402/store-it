@@ -4,11 +4,9 @@ import connectDB from "@/adapters/database/mongoose";
 import { s3, BUCKET } from "@/adapters/storage/s3";
 import { CreateMultipartUploadCommand } from "@aws-sdk/client-s3";
 import File from "@/adapters/database/models/File";
-import TelegramChunk from "@/adapters/database/models/TelegramChunk";
 import User from "@/adapters/database/models/User";
-import { deleteMessage } from "@/adapters/storage/telegram";
 
-const CHUNK_SIZE = 4 * 1024 * 1024;
+const CHUNK_SIZE = 10 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
   const authUser = await getAuthUser();
@@ -49,20 +47,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Storage limit exceeded" }, { status: 413 });
   }
 
-  const existingUpload = await File.findOne({ 
-    hash, 
-    owner_id: user._id, 
+  const existingUpload = await File.findOne({
+    hash,
+    owner_id: user._id,
     status: "uploaded",
-    backend: "s3" 
   });
   if (existingUpload) {
-    return NextResponse.json({ 
-      error: "Duplicate file", 
-      existingFile: existingUpload 
-    }, { status: 409 });
+    return NextResponse.json(
+      { error: "Duplicate file", existingFile: existingUpload },
+      { status: 409 },
+    );
   }
 
-  const key = `uploads/${user._id}/${Date.now()}-${filename}`;
+  const key = file.storageUrl || `uploads/${user._id}/${Date.now()}-${filename}`;
 
   const { UploadId } = await s3.send(
     new CreateMultipartUploadCommand({
@@ -76,20 +73,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Failed to initiate S3 multipart upload" }, { status: 500 });
   }
 
-  file.backend = "s3";
-  file.storageUrl = key;
-  file.destination = key;
   file.uploadId = UploadId;
-  file.status = "pending";
-  file.totalChunks = Math.ceil(size / CHUNK_SIZE);
-  file.chunkSize = CHUNK_SIZE;
-  await file.save();
-
-  const chunksToDelete = await TelegramChunk.find({ fileId: file._id });
-  for (const chunk of chunksToDelete) {
-    try { await deleteMessage(chunk.telegramMessageId); } catch {}
+  file.destination = key;
+  file.status = "s3_pending";
+  if (!file.storageUrl) {
+    file.storageUrl = key;
   }
-  await TelegramChunk.deleteMany({ fileId: file._id });
+  await file.save();
 
   const totalParts = Math.ceil(size / CHUNK_SIZE);
 
