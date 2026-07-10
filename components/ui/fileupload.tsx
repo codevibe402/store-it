@@ -530,6 +530,55 @@ export default function FileUpload() {
     openFolderShareModal(shareTarget.item, sharePermission);
   };
 
+  const copyFileShareUrl = async (file: FileType) => {
+    try {
+      const res = await fetch(`/api/files/${file._id}/share`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed");
+      const { shareUrl: url } = await res.json();
+      navigator.clipboard.writeText(url);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+      setToast({ msg: "Share link copied to clipboard", type: "success" });
+    } catch {
+      setToast({ msg: "Failed to generate share link", type: "error" });
+    }
+  };
+
+  const duplicateFileEntry = async (file: FileType) => {
+    try {
+      setToast({ msg: "Preparing duplicate...", type: "warn" });
+      const res = await fetch(`/api/files/${file._id}/duplicate`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed to duplicate");
+      const newFile = await res.json();
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      setToast({ msg: `"${file.filename}" duplicated successfully`, type: "success" });
+    } catch {
+      setToast({ msg: "Failed to duplicate file", type: "error" });
+    }
+  };
+
+  const renameFile = async (file: FileType, newName: string) => {
+    try {
+      const res = await fetch(`/api/files/${file._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: newName }),
+      });
+      if (!res.ok) throw new Error("Failed to rename");
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      setToast({ msg: "File renamed successfully", type: "success" });
+    } catch {
+      setToast({ msg: "Failed to rename file", type: "error" });
+    }
+  };
+
+  const viewFileDetails = (file: FileType) => {
+    setToast({
+      msg: `${file.filename} | ${formatBytes(file.size)} | ${file.mimetype} | Created: ${new Date(file.createdAt).toLocaleDateString()}`,
+      type: "success"
+    });
+  };
+
   const openVersions = async (file: FileType) => {
     setVersionTarget(file);
     setVersions([]);
@@ -1266,19 +1315,22 @@ export default function FileUpload() {
                                 "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
                                 openMenuId === file._id
                                   ? "border-[#353c52] text-[#e8eaf0] bg-[#1a1e28]"
-                                  : "border-[#252a38] text-[#6b7280] bg-[#13161e] hover:bg-[#1a1e28]"
+                                  : "border-[#252a38] text-[#6b7280] bg-[#13161e] hover:bg-[#1a1e28] focus:outline-none focus:ring-2 focus:ring-[#6c8eff] focus:ring-offset-2"
                               )}
+                              aria-label="Open file options menu"
+                              aria-haspopup="true"
+                              aria-expanded={openMenuId === file._id}
                               onClick={(e) => {
                                 if (openMenuId === file._id) {
                                   setOpenMenuId(null);
                                   setMenuPos(null);
                                 } else {
                                   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                  const menuWidth = 170;
+                                  const menuWidth = 160;
                                   let left = rect.right - menuWidth;
                                   if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - 8 - menuWidth;
                                   if (left < 8) left = 8;
-                                  const menuHeight = 260;
+                                  const menuHeight = 280;
                                   let top = rect.bottom + 6;
                                   if (top + menuHeight > window.innerHeight) {
                                     top = rect.top - 6 - menuHeight;
@@ -1289,7 +1341,7 @@ export default function FileUpload() {
                                 }
                               }}
                             >
-                              ...
+                              ⋮
                             </button>
                             {openMenuId === file._id && menuPos && (
                               <div
@@ -1386,6 +1438,33 @@ export default function FileUpload() {
                   onClick={() => { openFile(ctxMenu.item as FileType); setCtxMenu(null); }}
                 >
                   Open
+                </button>
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                  )}
+                  onClick={() => { copyFileShareUrl(ctxMenu.item as FileType); setCtxMenu(null); }}
+                >
+                  Copy link
+                </button>
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                  )}
+                  onClick={() => { viewFileDetails(ctxMenu.item as FileType); setCtxMenu(null); }}
+                >
+                  View details
+                </button>
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                  )}
+                  onClick={() => { duplicateFileEntry(ctxMenu.item as FileType); setCtxMenu(null); }}
+                >
+                  Duplicate
                 </button>
                 <button
                   className={cn(
