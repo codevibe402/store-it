@@ -907,7 +907,7 @@ export default function FileUpload() {
 
         <div className="relative z-10 mx-auto flex w-full max-w-7xl flex-col gap-8">
           <header className="flex items-center justify-between">
-            <h1 className="bg-gradient-to-r from-white to-indigo-400 bg-clip-text text-3xl font-bold tracking-tight text-transparent">
+            <h1 className="bg-gradient-to-r from-white to-indigo-400 bg-clip-text text-[1.5rem] font-bold tracking-tight text-transparent">
               StoreIt
             </h1>
             <div className="flex items-center gap-2">
@@ -986,7 +986,7 @@ export default function FileUpload() {
                 <div
                   className={cn(
                     "rounded-2xl border-dashed transition-all duration-200 cursor-pointer",
-                    "border-[1.5px] p-8 text-center gap-4 flex flex-col items-center justify-center",
+                    "border-[1.5px] p-10 text-center gap-3 flex flex-col items-center justify-center",
                     dragging ? "border-accent border-solid bg-[#6c8eff1a] transform -translate-y-1" : "border-[#252a38]"
                   )}
                   onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -998,10 +998,10 @@ export default function FileUpload() {
                   <div className="w-12 h-12 rounded-xl bg-[#1a1e28] border border-[#252a38] flex items-center justify-center">
                     <svg className="w-6 h-6 text-[#6c8eff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
                   </div>
-                  <div className="text-xl font-semibold text-[#e8eaf0]">
+                  <div className="text-[0.95rem] font-semibold text-[#e8eaf0]">
                     Drop your file here{currentFolder ? ` into "${currentFolder.name}"` : ""}
                   </div>
-                  <div className="text-sm text-[#6b7280]">
+                  <div className="text-[0.78rem] text-[#6b7280]">
                     or <span className="text-[#6c8eff] font-medium">browse</span> — under 10 MB uploads instantly, larger files use multipart
                   </div>
                 </div>
@@ -1011,7 +1011,7 @@ export default function FileUpload() {
                     {(status === "uploading" || status === "paused") && (
                       <div className="flex items-center justify-between">
                         <span className={cn(
-                          "text-sm font-medium",
+                          "text-[0.88rem] font-medium",
                           status === "paused" ? "text-[#fbbf24]" : "text-[#6c8eff]"
                         )}>
                           {status === "paused" ? "Paused Upload" : "Uploading"}
@@ -1022,23 +1022,23 @@ export default function FileUpload() {
                       {status === "uploading" && (
                         <div className={cn(
                           "flex items-center justify-between gap-2",
-                          "bg-[#13161e] border border-[#252a38] rounded-xl p-3"
+                          "bg-[#13161e] border border-[#252a38] rounded-xl p-2"
                         )}>
-                          <span className="text-sm text-[#e8eaf0] flex-1 truncate">
+                          <span className="text-[0.75rem] text-[#e8eaf0] flex-1 truncate">
                             {currentFileNameRef.current || "Uploading..."}
                           </span>
-                          <span className="text-sm text-[#6b7280] flex-shrink-0">{progress}%</span>
+                          <span className="text-[0.68rem] text-[#6b7280] flex-shrink-0">{progress}%</span>
                         </div>
                       )}
                       {status === "paused" && (
                         <div className={cn(
                           "flex items-center justify-between gap-2",
-                          "bg-[#13161e] border border-[#252a38] rounded-xl p-3"
+                          "bg-[#13161e] border border-[#252a38] rounded-xl p-2"
                         )}>
-                          <span className="text-sm text-[#e8eaf0] flex-1 truncate">
+                          <span className="text-[0.75rem] text-[#e8eaf0] flex-1 truncate">
                             {currentFileNameRef.current || "Paused"}
                           </span>
-                          <span className="text-sm text-[#6b7280] flex-shrink-0">Paused</span>
+                          <span className="text-[0.68rem] text-[#6b7280] flex-shrink-0">Paused</span>
                         </div>
                       )}
                     </div>
@@ -1062,10 +1062,10 @@ export default function FileUpload() {
                         {visiblePendingFiles.map((pf) => (
                           <div key={pf._id} className={cn(
                             "flex items-center gap-3",
-                            "bg-[#13161e] border border-[#252a38] rounded-xl p-3"
+                            "bg-[#13161e] border border-[#252a38] rounded-xl p-2"
                           )}>
-                            <span className="text-sm text-[#e8eaf0] flex-1 truncate">{pf.filename}</span>
-                            <span className="text-xs text-[#6b7280] flex-shrink-0">{formatBytes(pf.size)}</span>
+                            <span className="text-[0.75rem] text-[#e8eaf0] flex-1 truncate">{pf.filename}</span>
+                            <span className="text-[0.68rem] text-[#6b7280] flex-shrink-0">{formatBytes(pf.size)}</span>
                             <button
                               className={cn(
                                 "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
@@ -1156,13 +1156,13 @@ export default function FileUpload() {
               {foldersLoading ? (
                 <div className="flex flex-col gap-3">
                   {[...Array(3)].map((_, i) => (
-                    <div key={i} className="h-10 bg-[#1a1e28] rounded-xl animate-pulse" />
+                    <div key={i} className="h-8 bg-[#1a1e28] rounded-xl animate-pulse" />
                   ))}
                 </div>
               ) : visibleFolders.length > 0 ? (
                 <div>
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold text-[#e8eaf0]">Folders</h2>
+                    <h2 className="text-[0.9rem] font-semibold text-[#e8eaf0]">Folders</h2>
                     <span className="text-xs bg-[#1a1e28] border border-[#252a38] text-[#6b7280] px-2 py-1 rounded-full">
                       {visibleFolders.length}
                     </span>
@@ -1174,7 +1174,7 @@ export default function FileUpload() {
                         onClick={() => setCurrentFolderId(folder._id)}
                         onContextMenu={(e) => openCtx(e, folder, "folder")}
                         className={cn(
-                          "flex flex-col gap-2 p-4 rounded-xl border transition-all duration-150 cursor-pointer",
+                          "flex flex-col gap-2 px-3 py-4 rounded-xl border transition-all duration-150 cursor-pointer",
                           "border-[#252a38] bg-[#13161e] hover:border-[#fbbf24]/30 hover:transform hover:-translate-y-1"
                         )}
                       >
@@ -1187,9 +1187,9 @@ export default function FileUpload() {
                         >
                           ...
                         </button>
-                        <div className="text-2xl">📁</div>
-                        <div className="text-sm font-medium text-[#e8eaf0] truncate">{folder.name}</div>
-                        <div className="text-xs text-[#6b7280]">{uploadedFiles.filter((f) => f.folderId === folder._id).length} files</div>
+                        <div className="text-[26px]">📁</div>
+                        <div className="text-[0.8rem] font-medium text-[#e8eaf0] truncate">{folder.name}</div>
+                        <div className="text-[0.68rem] text-[#6b7280]">{uploadedFiles.filter((f) => f.folderId === folder._id).length} files</div>
                       </div>
                     ))}
                   </div>
@@ -1198,7 +1198,7 @@ export default function FileUpload() {
 
               <div>
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-[#e8eaf0]">Files</h2>
+                  <h2 className="text-[0.9rem] font-semibold text-[#e8eaf0]">Files</h2>
                   {!filesLoading && (
                     <span className="text-xs bg-[#1a1e28] border border-[#252a38] text-[#6b7280] px-2 py-1 rounded-full">
                       {visibleFiles.length}
@@ -1208,11 +1208,11 @@ export default function FileUpload() {
                 {filesLoading ? (
                   <div className="flex flex-col gap-3">
                     {[...Array(3)].map((_, i) => (
-                      <div key={i} className="h-10 bg-[#1a1e28] rounded-xl animate-pulse" />
+                      <div key={i} className="h-8 bg-[#1a1e28] rounded-xl animate-pulse" />
                     ))}
                   </div>
                 ) : visibleFiles.length === 0 ? (
-                  <div className="text-center py-12 text-[#6b7280]">
+                  <div className="text-center py-10 text-[#6b7280]">
                     <div className="text-2xl mb-4 opacity-40">📂</div>
                     <div>{currentFolder ? "No files in this folder yet" : "No files uploaded yet"}</div>
                   </div>
@@ -1223,16 +1223,16 @@ export default function FileUpload() {
                         key={file._id}
                         onContextMenu={(e) => openCtx(e, file, "file")}
                         className={cn(
-                          "flex items-center gap-3 p-3 rounded-xl border transition-all duration-150",
+                          "flex items-center gap-3 px-3 py-3 rounded-xl border transition-all duration-150",
                           "border-[#252a38] bg-[#13161e] hover:border-[#252a3880]"
                         )}
                       >
-                        <div className="text-lg flex-shrink-0">
+                        <div className="text-[20px] flex-shrink-0">
                           {getFileIcon(file.mimetype)}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-[#e8eaf0] truncate">{file.filename}</div>
-                          <div className="text-xs text-[#6b7280] truncate">
+                          <div className="text-[0.85rem] font-medium text-[#e8eaf0] truncate">{file.filename}</div>
+                          <div className="text-[0.7rem] text-[#6b7280] truncate">
                             {formatBytes(file.size)} - {new Date(file.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                             {file.folderId && folders.find(f => f._id === file.folderId) && (
                               <span className="text-xs text-[#fbbf24] ml-1">
@@ -1351,16 +1351,16 @@ export default function FileUpload() {
 
             <div className="space-y-4">
               <div className="bg-[#1a1e28] border border-[#252a38] rounded-xl p-4 sticky top-24">
-                <div className="text-sm text-[#e8eaf0] mb-2">Duplicate protection</div>
-                <div className="text-2xl font-semibold text-[#fbbf24]">{uploadedFiles.length} files watched</div>
+                <div className="text-[0.85rem] text-[#e8eaf0] mb-2">Duplicate protection</div>
+                <div className="text-[1.125rem] font-semibold text-[#fbbf24]">{uploadedFiles.length} files watched</div>
               </div>
               <div className="bg-[#1a1e28] border border-[#252a38] rounded-xl p-4">
-                <div className="text-sm text-[#e8eaf0] mb-2">Visible versioning</div>
-                <div className="text-sm text-[#6b7280]">Open any file's Versions button</div>
+                <div className="text-[0.85rem] text-[#e8eaf0] mb-2">Visible versioning</div>
+                <div className="text-[0.85rem] text-[#6b7280]">Open any file's Versions button</div>
               </div>
               <div className="bg-[#1a1e28] border border-[#252a38] rounded-xl p-4">
-                <div className="text-sm text-[#e8eaf0] mb-2">Expiring folder links</div>
-                <div className="text-sm text-[#6b7280]">Read or add access, 1-30 days</div>
+                <div className="text-[0.85rem] text-[#e8eaf0] mb-2">Expiring folder links</div>
+                <div className="text-[0.85rem] text-[#6b7280]">Read or add access, 1-30 days</div>
               </div>
             </div>
           </div>
@@ -1496,8 +1496,8 @@ export default function FileUpload() {
               )}
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className="text-lg font-semibold text-[#e8eaf0] mb-2">Share {shareTarget.type}</h3>
-              <p className="text-sm text-[#6b7280] mb-4">
+              <h3 className="text-[1.05rem] font-semibold text-[#e8eaf0] mb-2">Share {shareTarget.type}</h3>
+              <p className="text-[0.82rem] text-[#6b7280] mb-4">
                 {shareTarget.type === "file"
                   ? <>Anyone with the link can view <span>{shareTarget.item.filename}</span></>
                   : <>Folder link for <span>{shareTarget.item.name}</span> ({sharePermission === "add" ? "write access" : "read only"})</>}
