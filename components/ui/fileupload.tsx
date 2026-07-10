@@ -3,20 +3,23 @@ import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect, DragEvent, ChangeEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import {useReducer} from "react"
+import { useReducer } from "react"
 import FileSearch from "./filesearch";
 import { storeFile, getFile, removeFile } from "@/client/lib/indexedDB";
 import { resumeHandleCache, resumeFileCache } from "@/client/lib/resumeCache";
 import { resumeTelegramUpload } from "@/client/lib/telegramWorker";
 import { getFileHash } from "@/client/lib/hash";
 import { resumeUpload, getFileForResume } from "@/app/resume/page";
+import { clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
 
-// -- Constants --
+function cn(...classes: (string | boolean | undefined)[]) {
+  return twMerge(clsx(...classes));
+}
+
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 const CHUNK_SIZE = 10 * 1024 * 1024;
 
-
-// -- Types --
 type UploadStatus = "idle" | "uploading" | "paused" | "success" | "error" | "duplicate";
 
 type FileType = {
@@ -47,17 +50,17 @@ type ContextMenu = {
   item: FileType | FolderType
   itemType: "file" | "folder";
 };
-type uploadstate={
-  status:UploadStatus
+type uploadstate = {
+  status: UploadStatus
   progress: number
   error: string
-   duplicateFile: FileType | null
+  duplicateFile: FileType | null
 }
-const initialState:uploadstate ={
-status: "idle",
- progress: 0,
-error: "",
-duplicateFile: null
+const initialState: uploadstate = {
+  status: "idle",
+  progress: 0,
+  error: "",
+  duplicateFile: null
 }
 
 type DeleteTarget = { type: "file"; item: FileType } | { type: "folder"; item: FolderType };
@@ -81,48 +84,44 @@ type TelegramChunkError = Error & {
   isCancelled?: boolean;
 };
 
-// -- Utils --
- function formatBytes(bytes: number): string {
-   if (bytes < 1024) return `${bytes} B`;
-   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
- }
-
-function getFileIcon(mimetype: string): string {
-   if (mimetype.startsWith("image/")) return "[IMG]";
-   if (mimetype.startsWith("video/")) return "[VID]";
-   if (mimetype.startsWith("audio/")) return "[AUD]";
-   if (mimetype.includes("pdf")) return "[PDF]";
-   if (mimetype.includes("zip") || mimetype.includes("compressed")) return "[ARC]";
-   if (mimetype.includes("word") || mimetype.includes("document")) return "[DOC]";
-   if (mimetype.includes("sheet") || mimetype.includes("excel")) return "[SHT]";
-   return "[FILE]";
- }
-
-type UploadAction= 
-     | { type: "UPLOAD_START" }
-     | { type: "UPLOAD_PROGRESS"; progress: number }
-     | { type: "UPLOAD_SUCCESS" }
-     | { type: "UPLOAD_ERROR"; message: string };
-function reducer(state: uploadstate,action: UploadAction):uploadstate{
-  switch(action.type){
-    case "UPLOAD_START":
-      return {...state}
-    case "UPLOAD_PROGRESS":
-      return {...state, progress: action.progress}
-    case "UPLOAD_SUCCESS":
-      return {...state, status: "success"} 
-    case "UPLOAD_ERROR":
-      return {...state, status: "error", error: action.message}
-  }
-
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-// -- Component --
+function getFileIcon(mimetype: string): string {
+  if (mimetype.startsWith("image/")) return "[IMG]";
+  if (mimetype.startsWith("video/")) return "[VID]";
+  if (mimetype.startsWith("audio/")) return "[AUD]";
+  if (mimetype.includes("pdf")) return "[PDF]";
+  if (mimetype.includes("zip") || mimetype.includes("compressed")) return "[ARC]";
+  if (mimetype.includes("word") || mimetype.includes("document")) return "[DOC]";
+  if (mimetype.includes("sheet") || mimetype.includes("excel")) return "[SHT]";
+  return "[FILE]";
+}
+
+type UploadAction =
+  | { type: "UPLOAD_START" }
+  | { type: "UPLOAD_PROGRESS"; progress: number }
+  | { type: "UPLOAD_SUCCESS" }
+  | { type: "UPLOAD_ERROR"; message: string };
+function reducer(state: uploadstate, action: UploadAction): uploadstate {
+  switch (action.type) {
+    case "UPLOAD_START":
+      return { ...state }
+    case "UPLOAD_PROGRESS":
+      return { ...state, progress: action.progress }
+    case "UPLOAD_SUCCESS":
+      return { ...state, status: "success" }
+    case "UPLOAD_ERROR":
+      return { ...state, status: "error", error: action.message }
+  }
+}
+
 export default function FileUpload() {
   const [state, dispatch] = useReducer(reducer, initialState);
-
 
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -130,7 +129,6 @@ export default function FileUpload() {
   const isAuthenticated = sessionStatus === "authenticated";
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
-  // Upload state
   const [dragging, setDragging] = useState(false);
   const [status, setStatus] = useState<UploadStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
@@ -138,13 +136,11 @@ export default function FileUpload() {
   const [duplicateFile, setDuplicateFile] = useState<FileType | null>(null);
   const [toast, setToast] = useState<ToastMsg | null>(null);
 
-  // Folder / navigation state
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [moveNewFolderName, setMoveNewFolderName] = useState("");
 
-  // Context menu & modals
   const [ctxMenu, setCtxMenu] = useState<ContextMenu | null>(null);
   const [moveTarget, setMoveTarget] = useState<FileType | null>(null);
   const [moveFolderTarget, setMoveFolderTarget] = useState<FolderType | null>(null);
@@ -194,7 +190,6 @@ export default function FileUpload() {
     return () => window.removeEventListener("click", close);
   }, []);
 
-  // -- Queries --
   const { data: dashboard, isLoading: dashboardLoading } = useQuery<{
     files: FileType[];
     folders: FolderType[];
@@ -227,7 +222,6 @@ export default function FileUpload() {
     return new Error(data.error || fallback);
   }
 
-  // -- Small upload --
   const smallUploadMutation = useMutation({
     mutationFn: async ({ file, hash }: { file: File; hash: string }) => {
       const formData = new FormData();
@@ -249,7 +243,6 @@ export default function FileUpload() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
   });
 
-  // -- Multipart upload --
   async function multipartUpload(file: File, hash: string, onProgress: (pct: number) => void, onFileId?: (fileId: string) => void) {
     const initRes = await fetch("/api/files/upload/multipart/init", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -460,7 +453,6 @@ export default function FileUpload() {
     return (await res.json()).url;
   };
 
-  // -- File actions --
   const openFile = async (file: FileType) => {
     window.open(`/api/files/${file._id}/download?preview=1`, "_blank");
   };
@@ -660,7 +652,6 @@ export default function FileUpload() {
     } catch { setToast({ msg: "Could not create folder.", type: "error" }); }
   };
 
-  // -- Upload flow --
   const handleCancel = async () => {
     cancelRef.current = true;
     pauseRef.current = false;
@@ -723,7 +714,7 @@ export default function FileUpload() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fileId: meta.fileId }),
         });
-      } catch {}
+      } catch { }
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     }
   };
@@ -824,7 +815,6 @@ export default function FileUpload() {
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       setTimeout(() => setStatus("idle"), 3000);
     } else if (result.kind === "cancelled") {
-      // upload cancelled or paused – cleanup handled by resumeUpload
     } else {
       setStatus("error");
       setErrorMsg(result.message);
@@ -833,7 +823,6 @@ export default function FileUpload() {
     setResumingId(null);
   };
 
-  // -- Auto-resume on page refresh --
   useEffect(() => {
     if (hasAttemptedAutoResume.current) return
     if (!pendingFiles.length) return
@@ -875,9 +864,7 @@ export default function FileUpload() {
         const file = await fileHandle.getFile()
         handleFile(file, fileHandle)
         return
-      } catch {
-        // user cancelled or API error, fall through to hidden input
-      }
+      } catch { }
     }
     inputRef.current?.click()
   }
@@ -909,657 +896,906 @@ export default function FileUpload() {
 
   const currentFolder = folders.find((f) => f._id === currentFolderId);
 
-  // -- Render --
   return (
     <>
+      <div className="w-full min-h-screen bg-[#0a0b0f] flex flex-col gap-8 px-6 py-10 relative overflow-hidden">
+        <div className="absolute -top-40 -left-32 h-[600px] w-[600px] rounded-full bg-indigo-500/20 blur-[120px]" />
+        <div className="absolute -bottom-28 -right-20 h-[500px] w-[500px] rounded-full bg-violet-500/15 blur-[120px]" />
+        <div className="absolute left-1/2 top-1/2 h-[400px] w-[400px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-500/10 blur-[120px]" />
 
-      <div className="fu-root">
         {showSearch && <FileSearch onClose={() => setShowSearch(false)} topOffset={searchTop} />}
 
-        {/* -- Top nav -- */}
-        <div className="fu-topbar">
-          <div className="fu-topbar-brand">Storage</div>
-          <div className="fu-topbar-actions">
-            <button className="fu-topbar-btn" onClick={(e) => { setSearchTop(e.currentTarget.getBoundingClientRect().bottom + 8); setShowSearch(true); }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            </button>
-            <button className="fu-topbar-btn" onClick={() => router.push("/all-files")}>
-              All files
-            </button>
-            <button className="fu-topbar-btn accent" onClick={() => router.push("/sidebar")}>
-              Browse by type
-            </button>
-          </div>
-        </div>
-
-        {/* -- Folder tabs -- */}
-        <div className="fu-tabs-wrap">
-          <button
-            className={`fu-tab ${currentFolderId === null ? "active" : ""}`}
-            onClick={() => setCurrentFolderId(null)}
-          >
-            All files
-            <span className="fu-tab-count">{uploadedFiles.filter(f => f.folderId === null).length}</span>
-          </button>
-
-          {foldersLoading ? (
-            <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", padding: "0 8px" }}>Loading</span>
-          ) : (
-            folders.map((folder) => (
+        <div className="relative z-10 mx-auto flex w-full max-w-7xl flex-col gap-8">
+          <header className="flex items-center justify-between">
+            <h1 className="bg-gradient-to-r from-white to-indigo-400 bg-clip-text text-3xl font-bold tracking-tight text-transparent">
+              StoreIt
+            </h1>
+            <div className="flex items-center gap-2">
               <button
-                key={folder._id}
-                className={`fu-tab ${currentFolderId === folder._id ? "active" : ""}`}
-                onClick={() => setCurrentFolderId(folder._id)}
-                onContextMenu={(e) => openCtx(e, folder, "folder")}
-              >
-                {folder.name}
-                <span className="fu-tab-count">{uploadedFiles.filter(f => f.folderId === folder._id).length}</span>
-              </button>
-            ))
-          )}
-
-          {showNewFolder ? (
-            <div className="fu-new-folder-inline">
-              <input
-                className="fu-new-folder-input-inline"
-                placeholder="Folder name"
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") createFolder(); if (e.key === "Escape") setShowNewFolder(false); }}
-                autoFocus
-              />
-              <button className="fu-btn-pill" onClick={() => setShowNewFolder(false)}>x</button>
-              <button className="fu-btn-pill accent" onClick={createFolder}>Create</button>
-            </div>
-          ) : (
-            <button className="fu-tab-new" onClick={() => setShowNewFolder(true)}>+ New folder</button>
-          )}
-        </div>
-
-        {/* -- Main content -- */}
-        <div className="fu-shell">
-        <div className="fu-content">
-
-          {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            {currentFolder && (
-              <button className="fu-action-btn" onClick={() => setCurrentFolderId(currentFolder.parent_id ?? null)}>
-                Back
-              </button>
-            )}
-            <div style={{ color: "var(--text-muted)", fontSize: "0.85rem", fontWeight: 300 }}>
-              {currentFolder
-                ? `${visibleFiles.length} file${visibleFiles.length !== 1 ? "s" : ""} in "${currentFolder.name}"`
-                : "Drop files to upload, or browse from your device."}
-            </div>
-            {currentFolder && (
-              <div className="fu-header-actions">
-                  <button className="fu-action-btn" onClick={() => downloadFolder(currentFolder)}>
-                    Download folder
-                  </button>
-                <button className="fu-action-btn" onClick={() => openFolderShareModal(currentFolder, "read")}>
-                  Share read link
-                </button>
-                <button className="fu-action-btn" onClick={() => openFolderShareModal(currentFolder, "add")}>
-                  Share add link
-                </button>
-                <button
-                  className="fu-action-btn"
-                  style={{ color: "var(--error)", borderColor: "rgba(248,113,113,0.25)" }}
-                  onClick={() => setDeleteTarget({ type: "folder", item: currentFolder })}
-                >
-                  Delete folder
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Drop zone */}
-          <div
-            className={`fu-dropzone ${dragging ? "dragging" : ""}`}
-            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
-            onClick={handlePickFile}
-          >
-            <input ref={inputRef} type="file" hidden onChange={onInputChange} />
-            <div className="fu-dropzone-icon"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></div>
-            <div className="fu-dropzone-title">
-              Drop your file here{currentFolder ? ` into "${currentFolder.name}"` : ""}
-            </div>
-            <div className="fu-dropzone-sub">
-              or <span>browse</span> -- under 10 MB uploads instantly, larger files use multipart
-            </div>
-          </div>
-
-          {/* Active Uploads */}
-          {(status === "uploading" || status === "paused" || (!showPending && visiblePendingFiles.length > 0)) && (
-            <div>
-              {(status === "uploading" || status === "paused") && (
-                <div className="fu-section-header">
-                  <span className="fu-section-title">{status === "paused" ? "Paused Upload" : "Uploading"}</span>
-                </div>
-              )}
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {status === "uploading" && (
-                  <div className="fu-pending-row" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span className="fu-pending-name">{currentFileNameRef.current || "Uploading..."}</span>
-                      <span className="fu-pending-meta">{progress}%</span>
-                    </div>
-                    <div className="fu-bar-bg"><div className="fu-bar-fill" style={{ width: `${progress}%` }} /></div>
-                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                      <button className="fu-cancel-btn" onClick={handlePause}>Pause</button>
-                      <button className="fu-cancel-btn" onClick={handleCancel}>Cancel</button>
-                    </div>
-                  </div>
+                className={cn(
+                  "rounded-lg border px-4 py-2 text-sm font-medium transition hover",
+                  "border-red-400/20 bg-red-500/10 text-red-400 hover:bg-red-500/20"
                 )}
-                {status === "paused" && (
-                  <div className="fu-pending-row" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span className="fu-pending-name">{currentFileNameRef.current || "Paused"}</span>
-                      <span className="fu-pending-meta">Paused</span>
-                    </div>
-                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                      {(() => {
-                        const paused = pausedFileRef.current
-                        if (!paused) return null
-                        const pf = pendingFiles.find(p => p._id === paused.fileId) || { _id: paused.fileId, filename: paused.filename, size: 0 } as FileType
-                        return (
-                          <>
-                            <button className="fu-pending-btn resume" onClick={async () => {
-                              const savedFile = resumeFileCache.get(pf._id) || resumeFileCache.get(`${pf.filename}|${pf.size}`)
-                              if (savedFile) {
-                                await startResumeUpload(pf, savedFile, fileHandleRef.current ?? undefined)
-                                return
-                              }
-                              // Before any async calls, capture the user gesture
-                              const pickResult = await getFileForResume()
-                              if (!pickResult) return
-                              const refHandle = fileHandleRef.current
-                              if (refHandle) {
-                                try {
-                                  const opts = { mode: "read" as const }
-                                  if (await refHandle.queryPermission(opts) !== "granted") { await refHandle.requestPermission(opts) }
-                                  const file = await refHandle.getFile()
-                                  await startResumeUpload(pf, file, refHandle)
-                                  return
-                                } catch {}
-                              }
-                              const cachedHandle = resumeHandleCache.get(pf._id);
-                              if (cachedHandle) {
-                                try {
-                                  const opts = { mode: "read" as const }
-                                  if (await cachedHandle.queryPermission(opts) !== "granted") { await cachedHandle.requestPermission(opts) }
-                                  const file = await cachedHandle.getFile()
-                                  await startResumeUpload(pf, file, cachedHandle)
-                                  return
-                                } catch {}
-                              }
-                              const fromDB = await getFile(pf._id);
-                              if (fromDB) {
-                                resumeHandleCache.set(pf._id, fromDB.handle)
-                                try {
-                                  const opts = { mode: "read" as const }
-                                  if (await fromDB.handle.queryPermission(opts) !== "granted") { await fromDB.handle.requestPermission(opts) }
-                                  const file = await fromDB.handle.getFile()
-                                  await startResumeUpload(pf, file, fromDB.handle)
-                                  return
-                                } catch {}
-                              }
-                              const identityKey = `${pf.filename}|${pf.size}`
-                              const byIdentity = await getFile(identityKey)
-                              if (byIdentity) {
-                                resumeHandleCache.set(identityKey, byIdentity.handle)
-                                try {
-                                  const opts = { mode: "read" as const }
-                                  if (await byIdentity.handle.queryPermission(opts) !== "granted") { await byIdentity.handle.requestPermission(opts) }
-                                  const file = await byIdentity.handle.getFile()
-                                  await startResumeUpload(pf, file, byIdentity.handle)
-                                  return
-                                } catch {}
-                              }
-                              // Use the file from the gesture capture
-                              if (pickResult.handle) {
-                                resumeHandleCache.set(pf._id, pickResult.handle)
-                              }
-                              await startResumeUpload(pf, pickResult.file, pickResult.handle)
-                            }}>Resume</button>
-                            <button className="fu-pending-btn cancel" onClick={() => {
-                              pausedFileRef.current = null
-                              cancelledIds.current.add(pf._id)
-                              setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" })
-                              fetch("/api/files/telegram/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId: pf._id }) }).then(() => queryClient.invalidateQueries({ queryKey: ["dashboard"] })).catch(() => {})
-                              setStatus("idle")
-                            }}>Cancel</button>
-                          </>
-                        )
-                      })()}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Pending Uploads Toggle */}
-          {visiblePendingFiles.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              <button
-                className="fu-action-btn"
-                onClick={() => setShowPending(!showPending)}
-                style={{ width: "100%", textAlign: "center", justifyContent: "center" }}
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    fetch('/api/auth/signout');
+                  }
+                }}
               >
-                {showPending ? `Hide pending uploads` : `Show pending uploads (${visiblePendingFiles.length})`}
+                Logout
               </button>
-              {showPending && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-                  {visiblePendingFiles.map((pf) => (
-                    <div key={pf._id} className="fu-pending-row" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
-                      <span className="fu-pending-name">{pf.filename}</span>
-                      <span className="fu-pending-meta">{formatBytes(pf.size)}</span>
-                      <button className="fu-pending-btn resume" disabled={resumingId === pf._id} onClick={async () => {
-                        const savedFile = resumeFileCache.get(pf._id) || resumeFileCache.get(`${pf.filename}|${pf.size}`)
-                        if (savedFile) {
-                          await startResumeUpload(pf, savedFile, fileHandleRef.current ?? undefined)
-                          return
-                        }
-                        // Capture the user gesture before any async work
-                        const pickResult = await getFileForResume()
-                        if (!pickResult) return
-                        const refHandle = fileHandleRef.current
-                        if (refHandle) {
-                          try {
-                            const opts = { mode: "read" as const }
-                            if (await refHandle.queryPermission(opts) !== "granted") { await refHandle.requestPermission(opts) }
-                            const file = await refHandle.getFile()
-                            await startResumeUpload(pf, file, refHandle)
-                            return
-                          } catch {}
-                        }
-                        const cachedHandle = resumeHandleCache.get(pf._id);
-                        if (cachedHandle) {
-                          try {
-                            const opts = { mode: "read" as const }
-                            if (await cachedHandle.queryPermission(opts) !== "granted") { await cachedHandle.requestPermission(opts) }
-                            const file = await cachedHandle.getFile()
-                            await startResumeUpload(pf, file, cachedHandle)
-                            return
-                          } catch {}
-                        }
-                        const fromDB = await getFile(pf._id);
-                        if (fromDB) {
-                          resumeHandleCache.set(pf._id, fromDB.handle)
-                          try {
-                            const opts = { mode: "read" as const }
-                            if (await fromDB.handle.queryPermission(opts) !== "granted") { await fromDB.handle.requestPermission(opts) }
-                            const file = await fromDB.handle.getFile()
-                            await startResumeUpload(pf, file, fromDB.handle)
-                            return
-                          } catch {}
-                        }
-                        const identityKey = `${pf.filename}|${pf.size}`
-                        const byIdentity = await getFile(identityKey)
-                        if (byIdentity) {
-                          resumeHandleCache.set(identityKey, byIdentity.handle)
-                          try {
-                            const opts = { mode: "read" as const }
-                            if (await byIdentity.handle.queryPermission(opts) !== "granted") { await byIdentity.handle.requestPermission(opts) }
-                            const file = await byIdentity.handle.getFile()
-                            await startResumeUpload(pf, file, byIdentity.handle)
-                            return
-                          } catch {}
-                        }
-                        // Use the file from the gesture capture
-                        if (pickResult.handle) {
-                          resumeHandleCache.set(pf._id, pickResult.handle)
-                        }
-                        await startResumeUpload(pf, pickResult.file, pickResult.handle)
-                      }}>{resumingId === pf._id ? "Resuming..." : "Resume"}</button>
-                      <button className="fu-pending-btn cancel" onClick={() => {
-                        cancelledIds.current.add(pf._id)
-                        setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" })
-                        fetch("/api/files/telegram/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId: pf._id }) }).then(() => queryClient.invalidateQueries({ queryKey: ["dashboard"] })).catch(() => {})
-                      }}>Cancel</button>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
-          )}
+          </header>
 
-          {/* Folders grid */}
-          {!foldersLoading && visibleFolders.length > 0 && (
-            <div>
-              <div className="fu-section-header">
-                <span className="fu-section-title">Folders</span>
-                <span className="fu-section-count">{visibleFolders.length}</span>
-              </div>
-              <div className="fu-folder-grid">
-                {visibleFolders.map((folder) => (
-                  <div
-                    key={folder._id}
-                    className="fu-folder-card"
-                    onClick={() => setCurrentFolderId(folder._id)}
-                    onContextMenu={(e) => openCtx(e, folder, "folder")}
+          <div className="w-full">
+            <div className="flex flex-col gap-6">
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-[#6b7280]">Storage</div>
+                <div className="flex gap-2">
+                  <button
+                    className={cn(
+                      "rounded-lg border px-3 py-1.5 text-xs font-medium transition hover",
+                      "border-gray-600 bg-transparent text-gray-400 hover:bg-gray-800"
+                    )}
+                    onClick={() => setShowSearch(true)}
                   >
-                    <button className="fu-folder-card-opts" onClick={(e) => { e.stopPropagation(); openCtx(e, folder, "folder"); }}>...</button>
-                    <div className="fu-folder-icon">[FOLDER]</div>
-                    <div className="fu-folder-name">{folder.name}</div>
-                    <div className="fu-folder-count">{uploadedFiles.filter((f) => f.folderId === folder._id).length} files</div>
-                  </div>
-                ))}
+                    <svg className="inline-block w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21L14.35 14.35"/></svg>
+                  </button>
+                  <button
+                    className={cn(
+                      "rounded-lg border px-3 py-1.5 text-xs font-medium transition hover",
+                      "border-gray-600 bg-transparent text-gray-400 hover:bg-gray-800"
+                    )}
+                    onClick={() => router.push("/all-files")}
+                  >
+                    All files
+                  </button>
+                  <button
+                    className={cn(
+                      "rounded-lg border px-3 py-1.5 text-xs font-medium transition hover accent",
+                      "border-[#6c8eff]/30 bg-[#6c8eff1a] text-[#6c8eff] hover:bg-[#6c8eff25]"
+                    )}
+                    onClick={() => router.push("/sidebar")}
+                  >
+                    Browse by type
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
 
-          {/* File list */}
-          <div>
-            <div className="fu-section-header">
-              <span className="fu-section-title">Files</span>
-              {!filesLoading && <span className="fu-section-count">{visibleFiles.length}</span>}
-            </div>
-            {filesLoading ? (
-              <><div className="fu-skeleton" /><div className="fu-skeleton" /><div className="fu-skeleton" /></>
-            ) : visibleFiles.length === 0 ? (
-              <div className="fu-empty">
-                <div className="fu-empty-icon">[DIR]</div>
-                <div>{currentFolder ? "No files in this folder yet" : "No files uploaded yet"}</div>
-              </div>
-            ) : (
-              visibleFiles.map((file) => (
-                <div key={file._id} className="fu-file-card" onContextMenu={(e) => openCtx(e, file, "file")}>
-                  <div className="fu-file-icon">{getFileIcon(file.mimetype)}</div>
-                  <div className="fu-file-info">
-                    <div className="fu-file-name">{file.filename}</div>
-                    <div className="fu-file-meta">
-                      {formatBytes(file.size)} - {new Date(file.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                      {file.folderId && folders.find(f => f._id === file.folderId) && (
-                        <span style={{ marginLeft: 6, color: "var(--folder-color)", fontSize: "0.68rem" }}>
-                          [FOLDER] {folders.find(f => f._id === file.folderId)?.name}
-                        </span>
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center gap-2">
+                  {currentFolder && (
+                    <button
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition hover",
+                        "border-gray-600 bg-transparent text-gray-400 hover:bg-gray-800"
                       )}
-                    </div>
-                  </div>
-                  <div className="fu-file-actions">
-                    <button className="fu-icon-btn open"
-                      onClick={async () => openFile(file)}>
-                      Open
+                      onClick={() => setCurrentFolderId(currentFolder.parent_id ?? null)}
+                    >
+                      ← Back
                     </button>
-                    <button className="fu-icon-btn share" onClick={() => openShareModal(file)}>Share</button>
+                  )}
+                  <span className="text-xs text-[#6b7280] font-medium">
+                    {currentFolder
+                      ? `${visibleFiles.length} file${visibleFiles.length !== 1 ? 's' : ''} in "${currentFolder.name}"`
+                      : "Drop files to upload, or browse from your device."
+                    }
+                  </span>
+                </div>
 
-                    {/* Three-dot menu */}
-                    <div className="relative" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        className={`fu-icon-btn ${openMenuId === file._id ? "border-[var(--border-hover,#353c52)] text-[var(--text,#e8eaf0)]" : ""}`}
-                        onClick={(e) => {
-                          if (openMenuId === file._id) {
-                            setOpenMenuId(null);
-                            setMenuPos(null);
-                          } else {
-                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                            const menuWidth = 170;
-                            let left = rect.right - menuWidth;
-                            if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - 8 - menuWidth;
-                            if (left < 8) left = 8;
-                            const menuHeight = 260;
-                            let top = rect.bottom + 6;
-                            if (top + menuHeight > window.innerHeight) {
-                              top = rect.top - 6 - menuHeight;
-                              if (top < 8) top = 8;
-                            }
-                            setMenuPos({ top, left });
-                            setOpenMenuId(file._id);
-                          }
-                        }}
-                      >
-                        ...
-                      </button>
+                <div
+                  className={cn(
+                    "rounded-2xl border-dashed transition-all duration-200 cursor-pointer",
+                    "border-[1.5px] p-8 text-center gap-4 flex flex-col items-center justify-center",
+                    dragging ? "border-accent border-solid bg-[#6c8eff1a] transform -translate-y-1" : "border-[#252a38]"
+                  )}
+                  onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={onDrop}
+                  onClick={handlePickFile}
+                >
+                  <input ref={inputRef} type="file" hidden onChange={onInputChange} />
+                  <div className="w-12 h-12 rounded-xl bg-[#1a1e28] border border-[#252a38] flex items-center justify-center">
+                    <svg className="w-6 h-6 text-[#6c8eff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+                  </div>
+                  <div className="text-xl font-semibold text-[#e8eaf0]">
+                    Drop your file here{currentFolder ? ` into "${currentFolder.name}"` : ""}
+                  </div>
+                  <div className="text-sm text-[#6b7280]">
+                    or <span className="text-[#6c8eff] font-medium">browse</span> — under 10 MB uploads instantly, larger files use multipart
+                  </div>
+                </div>
 
-                      {openMenuId === file._id && menuPos && (
-                        <div className="fu-ctx" style={{ left: menuPos.left, top: menuPos.top, minWidth: 160, padding: 4 }}>
-                          <button className="fu-ctx-item"
-                            onClick={() => { openVersions(file); setOpenMenuId(null); setMenuPos(null); }}>
-                            📋 Version history
-                          </button>
-                          <button className="fu-ctx-item"
-                            onClick={() => { downloadFile(file); setOpenMenuId(null); setMenuPos(null); }}>
-                            ⬇️ Download
-                          </button>
-                          <button className="fu-ctx-item"
-                            onClick={() => { setMoveTarget(file); setOpenMenuId(null); setMenuPos(null); }}>
-                            📁 Move to folder
-                          </button>
-                          <div className="fu-ctx-sep" />
-                          <button className="fu-ctx-item danger"
-                             onClick={() => { setDeleteTarget({ type: "file", item: file }); setOpenMenuId(null); setMenuPos(null); }}>
-                             🗑️ Delete
-                           </button>
+                {(status === "uploading" || status === "paused" || (!showPending && visiblePendingFiles.length > 0)) && (
+                  <div className="flex flex-col gap-4">
+                    {(status === "uploading" || status === "paused") && (
+                      <div className="flex items-center justify-between">
+                        <span className={cn(
+                          "text-sm font-medium",
+                          status === "paused" ? "text-[#fbbf24]" : "text-[#6c8eff]"
+                        )}>
+                          {status === "paused" ? "Paused Upload" : "Uploading"}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-2">
+                      {status === "uploading" && (
+                        <div className={cn(
+                          "flex items-center justify-between gap-2",
+                          "bg-[#13161e] border border-[#252a38] rounded-xl p-3"
+                        )}>
+                          <span className="text-sm text-[#e8eaf0] flex-1 truncate">
+                            {currentFileNameRef.current || "Uploading..."}
+                          </span>
+                          <span className="text-sm text-[#6b7280] flex-shrink-0">{progress}%</span>
+                        </div>
+                      )}
+                      {status === "paused" && (
+                        <div className={cn(
+                          "flex items-center justify-between gap-2",
+                          "bg-[#13161e] border border-[#252a38] rounded-xl p-3"
+                        )}>
+                          <span className="text-sm text-[#e8eaf0] flex-1 truncate">
+                            {currentFileNameRef.current || "Paused"}
+                          </span>
+                          <span className="text-sm text-[#6b7280] flex-shrink-0">Paused</span>
                         </div>
                       )}
                     </div>
                   </div>
+                )}
+
+                {visiblePendingFiles.length > 0 && (
+                  <div className="mt-4">
+                    <button
+                      className={cn(
+                        "w-full text-center justify-center flex items-center gap-2",
+                        "rounded-lg border px-4 py-2 text-sm font-medium transition",
+                        "border-gray-600 bg-transparent text-gray-400 hover:bg-gray-800"
+                      )}
+                      onClick={() => setShowPending(!showPending)}
+                    >
+                      {showPending ? "Hide pending uploads" : `Show pending uploads (${visiblePendingFiles.length})`}
+                    </button>
+                    {showPending && (
+                      <div className="mt-4 flex flex-col gap-3">
+                        {visiblePendingFiles.map((pf) => (
+                          <div key={pf._id} className={cn(
+                            "flex items-center gap-3",
+                            "bg-[#13161e] border border-[#252a38] rounded-xl p-3"
+                          )}>
+                            <span className="text-sm text-[#e8eaf0] flex-1 truncate">{pf.filename}</span>
+                            <span className="text-xs text-[#6b7280] flex-shrink-0">{formatBytes(pf.size)}</span>
+                            <button
+                              className={cn(
+                                "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
+                                "border-green-600/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 disabled:opacity-50"
+                              )}
+                              disabled={resumingId === pf._id}
+                              onClick={async () => {
+                                const savedFile = resumeFileCache.get(pf._id) || resumeFileCache.get(`${pf.filename}|${pf.size}`)
+                                if (savedFile) {
+                                  await startResumeUpload(pf, savedFile, fileHandleRef.current ?? undefined)
+                                  return
+                                }
+                                const pickResult = await getFileForResume()
+                                if (!pickResult) return
+                                const refHandle = fileHandleRef.current
+                                if (refHandle) {
+                                  try {
+                                    const opts = { mode: "read" as const }
+                                    if (await refHandle.queryPermission(opts) !== "granted") { await refHandle.requestPermission(opts) }
+                                    const file = await refHandle.getFile()
+                                    await startResumeUpload(pf, file, refHandle)
+                                    return
+                                  } catch { }
+                                }
+                                const cachedHandle = resumeHandleCache.get(pf._id);
+                                if (cachedHandle) {
+                                  try {
+                                    const opts = { mode: "read" as const }
+                                    if (await cachedHandle.queryPermission(opts) !== "granted") { await cachedHandle.requestPermission(opts) }
+                                    const file = await cachedHandle.getFile()
+                                    await startResumeUpload(pf, file, cachedHandle)
+                                    return
+                                  } catch { }
+                                }
+                                const fromDB = await getFile(pf._id);
+                                if (fromDB) {
+                                  resumeHandleCache.set(pf._id, fromDB.handle)
+                                  try {
+                                    const opts = { mode: "read" as const }
+                                    if (await fromDB.handle.queryPermission(opts) !== "granted") { await fromDB.handle.requestPermission(opts) }
+                                    const file = await fromDB.handle.getFile()
+                                    await startResumeUpload(pf, file, fromDB.handle)
+                                    return
+                                  } catch { }
+                                }
+                                const identityKey = `${pf.filename}|${pf.size}`
+                                const byIdentity = await getFile(identityKey)
+                                if (byIdentity) {
+                                  resumeHandleCache.set(identityKey, byIdentity.handle)
+                                  try {
+                                    const opts = { mode: "read" as const }
+                                    if (await byIdentity.handle.queryPermission(opts) !== "granted") { await byIdentity.handle.requestPermission(opts) }
+                                    const file = await byIdentity.handle.getFile()
+                                    await startResumeUpload(pf, file, byIdentity.handle)
+                                    return
+                                  } catch { }
+                                }
+                                if (pickResult.handle) {
+                                  resumeHandleCache.set(pf._id, pickResult.handle)
+                                }
+                                await startResumeUpload(pf, pickResult.file, pickResult.handle)
+                              }}>
+                              {resumingId === pf._id ? "Resuming..." : "Resume"}
+                            </button>
+                            <button
+                              className={cn(
+                                "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
+                                "border-red-600/30 bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                              )}
+                              onClick={() => {
+                                pausedFileRef.current = null
+                                cancelledIds.current.add(pf._id)
+                                setToast({ msg: `Cancelled "${pf.filename}"`, type: "success" })
+                                fetch("/api/files/telegram/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId: pf._id }) }).then(() => queryClient.invalidateQueries({ queryKey: ["dashboard"] })).catch(() => {})
+                                setStatus("idle")
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {foldersLoading ? (
+                <div className="flex flex-col gap-3">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="h-10 bg-[#1a1e28] rounded-xl animate-pulse" />
+                  ))}
                 </div>
-              ))
-            )}
-          </div>
+              ) : visibleFolders.length > 0 ? (
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-[#e8eaf0]">Folders</h2>
+                    <span className="text-xs bg-[#1a1e28] border border-[#252a38] text-[#6b7280] px-2 py-1 rounded-full">
+                      {visibleFolders.length}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
+                    {visibleFolders.map((folder) => (
+                      <div
+                        key={folder._id}
+                        onClick={() => setCurrentFolderId(folder._id)}
+                        onContextMenu={(e) => openCtx(e, folder, "folder")}
+                        className={cn(
+                          "flex flex-col gap-2 p-4 rounded-xl border transition-all duration-150 cursor-pointer",
+                          "border-[#252a38] bg-[#13161e] hover:border-[#fbbf24]/30 hover:transform hover:-translate-y-1"
+                        )}
+                      >
+                        <button
+                          className={cn(
+                            "absolute top-2 right-2 rounded-md p-1 text-gray-400 hover:text-white hover:bg-[#252a38]",
+                            "opacity-0 group-hover:opacity-100 transition-opacity"
+                          )}
+                          onClick={(e) => { e.stopPropagation(); openCtx(e, folder, "folder"); }}
+                        >
+                          ...
+                        </button>
+                        <div className="text-2xl">📁</div>
+                        <div className="text-sm font-medium text-[#e8eaf0] truncate">{folder.name}</div>
+                        <div className="text-xs text-[#6b7280]">{uploadedFiles.filter((f) => f.folderId === folder._id).length} files</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
-        </div>
-        <aside className="fu-insights">
-          <div className="fu-trust-card">
-            <div className="fu-trust-label">Duplicate protection</div>
-            <div className="fu-trust-value">{uploadedFiles.length} files watched</div>
-          </div>
-          <div className="fu-trust-card">
-            <div className="fu-trust-label">Visible versioning</div>
-            <div className="fu-trust-value">Open any file&apos;s Versions button</div>
-          </div>
-          <div className="fu-trust-card">
-            <div className="fu-trust-label">Expiring folder links</div>
-            <div className="fu-trust-value">Read or add access, 1-30 days</div>
-          </div>
-        </aside>
-        </div>
-      </div>
-
-      {/* -- Context menu -- */}
-      {ctxMenu && (
-        <div className="fixed z-[1000] min-w-[170px] animate-[ctxIn_0.12s_ease] rounded-[12px] border border-[var(--border,#252a38)] bg-[var(--surface2,#1a1e28)] p-[6px] shadow-[0_12px_40px_rgba(0,0,0,0.5)]" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
-          {ctxMenu.itemType === "file" ? (
-            <>
-              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={async () => { await openFile(ctxMenu.item as FileType); setCtxMenu(null); }}>Open</button>
-              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { openShareModal(ctxMenu.item as FileType); setCtxMenu(null); }}>Share</button>
-              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { downloadFile(ctxMenu.item as FileType); setCtxMenu(null); }}>Download</button>
-              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { setMoveTarget(ctxMenu.item as FileType); setCtxMenu(null); }}>Move to folder</button>
-              <div className="h-px bg-[var(--border,#252a38)] my-1" />
-              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)] hover:text-[var(--error,#f87171)] hover:bg-[rgba(248,113,113,0.08)]" onClick={() => { setDeleteTarget({ type: "file", item: ctxMenu.item as FileType }); setCtxMenu(null); }}>Delete</button>
-            </>
-          ) : (
-            <>
-              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { setCurrentFolderId((ctxMenu.item as FolderType)._id); setCtxMenu(null); }}>Open folder</button>
-              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "read"); setCtxMenu(null); }}>Share read link</button>
-              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "add"); setCtxMenu(null); }}>Share write link</button>
-              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { setMoveFolderTarget(ctxMenu.item as FolderType); setCtxMenu(null); }}>Move folder</button>
-              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)]" onClick={() => { downloadFolder(ctxMenu.item as FolderType); setCtxMenu(null); }}>Download as ZIP</button>
-              <div className="h-px bg-[var(--border,#252a38)] my-1" />
-              <button className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] border-none bg-none px-3 py-2 text-left text-[0.82rem] text-[var(--text-dim,#9ca3af)] transition-all duration-100 hover:bg-[var(--surface,#13161e)] hover:text-[var(--text,#e8eaf0)] hover:text-[var(--error,#f87171)] hover:bg-[rgba(248,113,113,0.08)]" onClick={() => { setDeleteTarget({ type: "folder", item: ctxMenu.item as FolderType }); setCtxMenu(null); }}>Delete folder</button>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* -- Share modal -- */}
-      {shareTarget && (
-        <div className="fu-overlay" onClick={() => setShareTarget(null)}>
-          <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="fu-modal-title">Share {shareTarget.type}</div>
-            <div className="fu-modal-sub">
-              {shareTarget.type === "file"
-                ? <>Anyone with the link can view <span>{shareTarget.item.filename}</span></>
-                : <>Folder link for <span>{shareTarget.item.name}</span> ({sharePermission === "add" ? "write access" : "read only"})</>}
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-[#e8eaf0]">Files</h2>
+                  {!filesLoading && (
+                    <span className="text-xs bg-[#1a1e28] border border-[#252a38] text-[#6b7280] px-2 py-1 rounded-full">
+                      {visibleFiles.length}
+                    </span>
+                  )}
+                </div>
+                {filesLoading ? (
+                  <div className="flex flex-col gap-3">
+                    {[...Array(3)].map((_, i) => (
+                      <div key={i} className="h-10 bg-[#1a1e28] rounded-xl animate-pulse" />
+                    ))}
+                  </div>
+                ) : visibleFiles.length === 0 ? (
+                  <div className="text-center py-12 text-[#6b7280]">
+                    <div className="text-2xl mb-4 opacity-40">📂</div>
+                    <div>{currentFolder ? "No files in this folder yet" : "No files uploaded yet"}</div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {visibleFiles.map((file) => (
+                      <div
+                        key={file._id}
+                        onContextMenu={(e) => openCtx(e, file, "file")}
+                        className={cn(
+                          "flex items-center gap-3 p-3 rounded-xl border transition-all duration-150",
+                          "border-[#252a38] bg-[#13161e] hover:border-[#252a3880]"
+                        )}
+                      >
+                        <div className="text-lg flex-shrink-0">
+                          {getFileIcon(file.mimetype)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-[#e8eaf0] truncate">{file.filename}</div>
+                          <div className="text-xs text-[#6b7280] truncate">
+                            {formatBytes(file.size)} - {new Date(file.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                            {file.folderId && folders.find(f => f._id === file.folderId) && (
+                              <span className="text-xs text-[#fbbf24] ml-1">
+                                [FOLDER] {folders.find(f => f._id === file.folderId)?.name}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button
+                            className={cn(
+                              "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
+                              "border-[#6c8eff]/30 bg-[#6c8eff1a] text-[#6c8eff] hover:bg-[#6c8eff25]"
+                            )}
+                            onClick={async () => { await openFile(file); }}
+                          >
+                            Open
+                          </button>
+                          <button
+                            className={cn(
+                              "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
+                              "border-green-600/30 bg-green-500/10 text-green-400 hover:bg-green-500/20"
+                            )}
+                            onClick={() => openShareModal(file)}
+                          >
+                            Share
+                          </button>
+                          <div className="relative">
+                            <button
+                              className={cn(
+                                "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
+                                openMenuId === file._id
+                                  ? "border-[#353c52] text-[#e8eaf0] bg-[#1a1e28]"
+                                  : "border-[#252a38] text-[#6b7280] bg-[#13161e] hover:bg-[#1a1e28]"
+                              )}
+                              onClick={(e) => {
+                                if (openMenuId === file._id) {
+                                  setOpenMenuId(null);
+                                  setMenuPos(null);
+                                } else {
+                                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                  const menuWidth = 170;
+                                  let left = rect.right - menuWidth;
+                                  if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - 8 - menuWidth;
+                                  if (left < 8) left = 8;
+                                  const menuHeight = 260;
+                                  let top = rect.bottom + 6;
+                                  if (top + menuHeight > window.innerHeight) {
+                                    top = rect.top - 6 - menuHeight;
+                                    if (top < 8) top = 8;
+                                  }
+                                  setMenuPos({ top, left });
+                                  setOpenMenuId(file._id);
+                                }
+                              }}
+                            >
+                              ...
+                            </button>
+                            {openMenuId === file._id && menuPos && (
+                              <div
+                                className={cn(
+                                  "fixed z-[1000] min-w-[160px] animate-[ctxIn_0.12s_ease] rounded-[12px]",
+                                  "border border-[#252a38] bg-[#1a1e28] p-2",
+                                  "shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
+                                )}
+                                style={{ left: menuPos.left, top: menuPos.top }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <button
+                                  className={cn(
+                                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                                  )}
+                                  onClick={() => { openVersions(file); setOpenMenuId(null); setMenuPos(null); }}
+                                >
+                                  📋 Version history
+                                </button>
+                                <button
+                                  className={cn(
+                                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                                  )}
+                                  onClick={() => { downloadFile(file); setOpenMenuId(null); setMenuPos(null); }}
+                                >
+                                  ⬇️ Download
+                                </button>
+                                <button
+                                  className={cn(
+                                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                                  )}
+                                  onClick={() => { setMoveTarget(file); setOpenMenuId(null); setMenuPos(null); }}
+                                >
+                                  📁 Move to folder
+                                </button>
+                                <div className="h-px bg-[#252a38] my-1" />
+                                <button
+                                  className={cn(
+                                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                                    "text-[#f87171] transition-all duration-100 hover:bg-[#13161e] hover:text-[#f87171]"
+                                  )}
+                                  onClick={() => { setDeleteTarget({ type: "file", item: file }); setOpenMenuId(null); setMenuPos(null); }}
+                                >
+                                  🗑️ Delete
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-            {shareTarget.type === "folder" && (
-              <div className="fu-folder-picker" style={{ marginBottom: 12 }}>
-                <button className={`fu-picker-item ${sharePermission === "read" ? "active" : ""}`} onClick={() => { setSharePermission("read"); openFolderShareModal(shareTarget.item, "read"); }}>
-                  Read only
-                </button>
-                <button className={`fu-picker-item ${sharePermission === "add" ? "active" : ""}`} onClick={() => { setSharePermission("add"); openFolderShareModal(shareTarget.item, "add"); }}>
-                  Write access
-                </button>
-                <input
-                  className="fu-share-url"
-                  style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 9, width: "100%" }}
-                  type="number"
-                  min={1}
-                  max={30}
-                  value={shareExpiresInDays}
-                  onChange={(e) => setShareExpiresInDays(Number(e.target.value))}
-                  onBlur={refreshFolderShare}
-                />
+
+            <div className="space-y-4">
+              <div className="bg-[#1a1e28] border border-[#252a38] rounded-xl p-4 sticky top-24">
+                <div className="text-sm text-[#e8eaf0] mb-2">Duplicate protection</div>
+                <div className="text-2xl font-semibold text-[#fbbf24]">{uploadedFiles.length} files watched</div>
               </div>
+              <div className="bg-[#1a1e28] border border-[#252a38] rounded-xl p-4">
+                <div className="text-sm text-[#e8eaf0] mb-2">Visible versioning</div>
+                <div className="text-sm text-[#6b7280]">Open any file's Versions button</div>
+              </div>
+              <div className="bg-[#1a1e28] border border-[#252a38] rounded-xl p-4">
+                <div className="text-sm text-[#e8eaf0] mb-2">Expiring folder links</div>
+                <div className="text-sm text-[#6b7280]">Read or add access, 1-30 days</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {ctxMenu && (
+          <div
+            className={cn(
+              "fixed z-[1000] min-w-[170px] animate-[ctxIn_0.12s_ease] rounded-[12px]",
+              "border border-[#252a38] bg-[#1a1e28] p-2",
+              "shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
             )}
-            {shareUrl ? (
-              <div className="fu-share-url-wrap">
-                <input className="fu-share-url" readOnly value={shareUrl} />
-                <button className={`fu-copy-btn ${shareCopied ? "copied" : ""}`} onClick={copyShareUrl}>
-                  {shareCopied ? "Copied" : "Copy"}
+            style={{ left: ctxMenu.x, top: ctxMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {ctxMenu.itemType === "file" ? (
+              <>
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                  )}
+                  onClick={() => { openFile(ctxMenu.item as FileType); setCtxMenu(null); }}
+                >
+                  Open
                 </button>
-              </div>
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                  )}
+                  onClick={() => { openShareModal(ctxMenu.item as FileType); setCtxMenu(null); }}
+                >
+                  Share
+                </button>
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                  )}
+                  onClick={() => { downloadFile(ctxMenu.item as FileType); setCtxMenu(null); }}
+                >
+                  Download
+                </button>
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                  )}
+                  onClick={() => { setMoveTarget(ctxMenu.item as FileType); setCtxMenu(null); }}
+                >
+                  Move to folder
+                </button>
+                <div className="h-px bg-[#252a38] my-1" />
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#f87171] transition-all duration-100 hover:bg-[#13161e] hover:text-[#f87171]"
+                  )}
+                  onClick={() => { setDeleteTarget({ type: "file", item: ctxMenu.item as FileType }); setCtxMenu(null); }}
+                >
+                  Delete
+                </button>
+              </>
             ) : (
-              <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Generating link...</div>
+              <>
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                  )}
+                  onClick={() => { setCurrentFolderId((ctxMenu.item as FolderType)._id); setCtxMenu(null); }}
+                >
+                  Open folder
+                </button>
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                  )}
+                  onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "read"); setCtxMenu(null); }}
+                >
+                  Share read link
+                </button>
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                  )}
+                  onClick={() => { openFolderShareModal(ctxMenu.item as FolderType, "add"); setCtxMenu(null); }}
+                >
+                  Share write link
+                </button>
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                  )}
+                  onClick={() => { setMoveFolderTarget(ctxMenu.item as FolderType); setCtxMenu(null); }}
+                >
+                  Move folder
+                </button>
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
+                  )}
+                  onClick={() => { downloadFolder(ctxMenu.item as FolderType); setCtxMenu(null); }}
+                >
+                  Download as ZIP
+                </button>
+                <div className="h-px bg-[#252a38] my-1" />
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
+                    "text-[#f87171] transition-all duration-100 hover:bg-[#13161e] hover:text-[#f87171]"
+                  )}
+                  onClick={() => { setDeleteTarget({ type: "folder", item: ctxMenu.item as FolderType }); setCtxMenu(null); }}
+                >
+                  Delete folder
+                </button>
+              </>
             )}
-            <div className="fu-modal-actions">
-              <button className="fu-modal-btn secondary" onClick={() => setShareTarget(null)}>Close</button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* -- Move modal -- */}
-      {moveTarget && (
-        <div className="fu-overlay" onClick={() => setMoveTarget(null)}>
-          <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="fu-modal-title">Move file</div>
-            <div className="fu-modal-sub">Choose a destination for <span>{moveTarget.filename}</span></div>
-            <div className="fu-folder-picker">
-              <button className={`fu-picker-item ${moveTarget.folderId === null ? "active" : ""}`} onClick={() => moveFile(moveTarget, null)}>
-                Root (no folder)
-              </button>
-              {moveTarget.folderId === null && (
-                <div className="fu-move-create">
+        {shareTarget && (
+          <div className="fixed inset-0 bg-black/65 flex items-center justify-center z-50 animate-[fadeIn_0.15s_ease]" onClick={() => setShareTarget(null)}>
+            <div
+              className={cn(
+                "bg-[#1a1e28] border border-[#252a38] rounded-xl p-6 w-full max-w-sm",
+                "animate-[slideUp_0.2s_ease]"
+              )}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-[#e8eaf0] mb-2">Share {shareTarget.type}</h3>
+              <p className="text-sm text-[#6b7280] mb-4">
+                {shareTarget.type === "file"
+                  ? <>Anyone with the link can view <span>{shareTarget.item.filename}</span></>
+                  : <>Folder link for <span>{shareTarget.item.name}</span> ({sharePermission === "add" ? "write access" : "read only"})</>}
+              </p>
+              {shareTarget.type === "folder" && (
+                <div className="mb-4">
+                  <div className="flex gap-2 mb-2">
+                    <button
+                      className={cn(
+                        "flex-1 px-3 py-1.5 text-xs font-medium rounded-lg border transition",
+                        sharePermission === "read"
+                          ? "border-[#6c8eff]/30 bg-[#6c8eff1a] text-[#6c8eff]"
+                          : "border-gray-600 bg-transparent text-gray-400 hover:bg-gray-800"
+                      )}
+                      onClick={() => { setSharePermission("read"); openFolderShareModal(shareTarget.item, "read"); }}
+                    >
+                      Read only
+                    </button>
+                    <button
+                      className={cn(
+                        "flex-1 px-3 py-1.5 text-xs font-medium rounded-lg border transition",
+                        sharePermission === "add"
+                          ? "border-[#6c8eff]/30 bg-[#6c8eff1a] text-[#6c8eff]"
+                          : "border-gray-600 bg-transparent text-gray-400 hover:bg-gray-800"
+                      )}
+                      onClick={() => { setSharePermission("add"); openFolderShareModal(shareTarget.item, "add"); }}
+                    >
+                      Write access
+                    </button>
+                  </div>
                   <input
-                    value={moveNewFolderName}
-                    onChange={(e) => setMoveNewFolderName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") createFolderAndMoveFile(); }}
-                    placeholder="Create folder in root"
+                    className={cn(
+                      "w-full bg-[#13161e] border border-[#252a38] rounded-lg px-3 py-2 text-xs text-[#6b7280]",
+                      "outline-none focus:border-[#6c8eff]/50"
+                    )}
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={shareExpiresInDays}
+                    onChange={(e) => setShareExpiresInDays(Number(e.target.value))}
+                    onBlur={refreshFolderShare}
                   />
-                  <button onClick={createFolderAndMoveFile}>Create & move</button>
                 </div>
               )}
-              {folders.map((folder) => (
+              {shareUrl ? (
+                <div className="flex gap-2">
+                  <input
+                    className={cn(
+                      "flex-1 bg-[#13161e] border border-[#252a38] rounded-lg px-3 py-2 text-xs text-[#6b7280]",
+                      "truncate outline-none"
+                    )}
+                    readOnly
+                    value={shareUrl}
+                  />
+                  <button
+                    className={cn(
+                      "px-3 py-2 text-xs font-medium rounded-lg transition",
+                      shareCopied
+                        ? "bg-green-500/20 border border-green-500/30 text-green-400"
+                        : "border-[#6c8eff]/30 bg-[#6c8eff1a] text-[#6c8eff] hover:bg-[#6c8eff25]"
+                    )}
+                    onClick={copyShareUrl}
+                  >
+                    {shareCopied ? "Copied" : "Copy"}
+                  </button>
+                </div>
+              ) : (
+                <div className="text-xs text-[#6b7280]">Generating link...</div>
+              )}
+              <div className="flex gap-2 mt-6">
                 <button
-                  key={folder._id}
-                  className={`fu-picker-item ${moveTarget.folderId === folder._id ? "active" : ""}`}
-                  onClick={() => moveFile(moveTarget, folder._id)}
+                  className={cn(
+                    "flex-1 px-4 py-2 text-sm font-medium rounded-lg",
+                    "border border-gray-600 text-gray-400 hover:bg-gray-800 hover:text-white"
+                  )}
+                  onClick={() => setShareTarget(null)}
                 >
-                  {folder.name}
-                  <span style={{ marginLeft: "auto", fontSize: "0.7rem", color: "var(--text-muted)" }}>
-                    {uploadedFiles.filter(f => f.folderId === folder._id).length}
-                  </span>
+                  Close
                 </button>
-              ))}
-            </div>
-            <div className="fu-modal-actions">
-              <button className="fu-modal-btn secondary" onClick={() => setMoveTarget(null)}>Cancel</button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {moveFolderTarget && (
-        <div className="fu-overlay" onClick={() => setMoveFolderTarget(null)}>
-          <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="fu-modal-title">Move folder</div>
-            <div className="fu-modal-sub">Choose a destination for <span>{moveFolderTarget.name}</span></div>
-            <div className="fu-folder-picker">
-              <button
-                className={`fu-picker-item ${(moveFolderTarget.parent_id ?? null) === null ? "active" : ""}`}
-                onClick={() => moveFolder(moveFolderTarget, null)}
-              >
-                Root
-              </button>
-              {folders
-                .filter((folder) => folder._id !== moveFolderTarget._id)
-                .map((folder) => (
+        {moveTarget && (
+          <div className="fixed inset-0 bg-black/65 flex items-center justify-center z-50 animate-[fadeIn_0.15s_ease]" onClick={() => setMoveTarget(null)}>
+            <div className={cn("bg-[#1a1e28] border border-[#252a38] rounded-xl p-6 w-full max-w-sm", "animate-[slideUp_0.2s_ease]")} onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-lg font-semibold text-[#e8eaf0] mb-2">Move file</h3>
+              <p className="text-sm text-[#6b7280] mb-4">Choose a destination for <span>{moveTarget.filename}</span></p>
+              <div className="flex flex-col gap-2 max-h-56 overflow-y-auto">
+                <button
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border transition",
+                    moveTarget.folderId === null
+                      ? "border-[#6c8eff]/30 bg-[#6c8eff1a] text-[#6c8eff]"
+                      : "border-gray-600 bg-transparent text-gray-400 hover:bg-gray-800"
+                  )}
+                  onClick={() => moveFile(moveTarget, null)}
+                >
+                  Root (no folder)
+                </button>
+                {moveTarget.folderId === null && (
+                  <div className="grid grid-cols-[1fr_auto] gap-2 mt-2">
+                    <input
+                      className={cn(
+                        "bg-[#13161e] border border-[#6c8eff] rounded-lg px-3 py-1.5 text-sm text-[#e8eaf0]",
+                        "outline-none"
+                      )}
+                      placeholder="Create folder in root"
+                      value={moveNewFolderName}
+                      onChange={(e) => setMoveNewFolderName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") createFolderAndMoveFile(); }}
+                    />
+                    <button
+                      className={cn(
+                        "px-2.5 py-1.5 text-xs font-medium rounded-lg",
+                        "border border-[#6c8eff]/30 bg-[#6c8eff1a] text-[#6c8eff] hover:bg-[#6c8eff25]"
+                      )}
+                      onClick={createFolderAndMoveFile}
+                    >
+                      Create & move
+                    </button>
+                  </div>
+                )}
+                {folders.map((folder) => (
                   <button
                     key={folder._id}
-                    className={`fu-picker-item ${moveFolderTarget.parent_id === folder._id ? "active" : ""}`}
-                    onClick={() => moveFolder(moveFolderTarget, folder._id)}
+                    className={cn(
+                      "flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border transition",
+                      moveTarget.folderId === folder._id
+                        ? "border-[#6c8eff]/30 bg-[#6c8eff1a] text-[#6c8eff]"
+                        : "border-gray-600 bg-transparent text-gray-400 hover:bg-gray-800"
+                    )}
+                    onClick={() => moveFile(moveTarget, folder._id)}
                   >
                     {folder.name}
-                  </button>
-                ))}
-            </div>
-            <div className="fu-modal-actions">
-              <button className="fu-modal-btn secondary" onClick={() => setMoveFolderTarget(null)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* -- Version history modal -- */}
-      {versionTarget && (
-        <div className="fu-overlay" onClick={() => setVersionTarget(null)}>
-          <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="fu-modal-title">Version history</div>
-            <div className="fu-modal-sub">Every saved version of <span>{versionTarget.filename}</span> is visible here.</div>
-            <div className="fu-folder-picker">
-              {versionsLoading ? (
-                <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Loading versions...</div>
-              ) : versions.length === 0 ? (
-                <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>No versions recorded yet.</div>
-              ) : (
-                versions.map((version) => (
-                  <button className={`fu-picker-item ${version.isCurrent ? "active" : ""}`} key={version.id} onClick={() => openVersionUrl(version)}>
-                    v{version.version}
-                    <span style={{ marginLeft: "auto", fontSize: "0.7rem", color: "var(--text-muted)" }}>
-                      {version.isCurrent ? "Current" : new Date(version.uploadedAt).toLocaleDateString()}
+                    <span className="text-xs text-[#6b7280] ml-auto">
+                      {uploadedFiles.filter(f => f.folderId === folder._id).length}
                     </span>
                   </button>
-                ))
-              )}
-            </div>
-            <div className="fu-modal-actions">
-              <button className="fu-modal-btn secondary" onClick={() => setVersionTarget(null)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* -- Delete confirm modal -- */}
-      {deleteTarget && (
-        <div className="fu-overlay" onClick={() => setDeleteTarget(null)}>
-          <div className="fu-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="fu-modal-title">Confirm delete</div>
-            <div className="fu-modal-sub">
-              {deleteTarget.type === "file"
-                ? `Delete "${(deleteTarget.item as FileType).filename}"? This cannot be undone.`
-                : `Delete folder "${deleteTarget.item.name}" and all its contents? This cannot be undone.`}
-            </div>
-            <div className="fu-modal-actions">
-              <button className="fu-modal-btn secondary" onClick={() => setDeleteTarget(null)}>Cancel</button>
-              <button className="fu-modal-btn danger" onClick={confirmDelete}>Delete</button>
+                ))}
+              </div>
+              <button
+                className={cn(
+                  "mt-4 w-full px-4 py-2 text-sm font-medium rounded-lg",
+                  "border border-gray-600 text-gray-400 hover:bg-gray-800 hover:text-white"
+                )}
+                onClick={() => setMoveTarget(null)}
+              >
+                Cancel
+              </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* -- Toast -- */}
-      {toast && (
-        <div className={`fu-toast ${toast.type}`}>
-          {toast.type === "success" ? "+" : toast.type === "warn" ? "!" : "x"} {toast.msg}
-        </div>
-      )}
+        {moveFolderTarget && (
+          <div className="fixed inset-0 bg-black/65 flex items-center justify-center z-50 animate-[fadeIn_0.15s_ease]" onClick={() => setMoveFolderTarget(null)}>
+            <div className={cn("bg-[#1a1e28] border border-[#252a38] rounded-xl p-6 w-full max-w-sm", "animate-[slideUp_0.2s_ease]")} onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-lg font-semibold text-[#e8eaf0] mb-2">Move folder</h3>
+              <p className="text-sm text-[#6b7280] mb-4">Choose a destination for <span>{moveFolderTarget.name}</span></p>
+              <div className="flex flex-col gap-2 max-h-56 overflow-y-auto">
+                <button
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border transition",
+                    (moveFolderTarget.parent_id ?? null) === null
+                      ? "border-[#6c8eff]/30 bg-[#6c8eff1a] text-[#6c8eff]"
+                      : "border-gray-600 bg-transparent text-gray-400 hover:bg-gray-800"
+                  )}
+                  onClick={() => moveFolder(moveFolderTarget, null)}
+                >
+                  Root
+                </button>
+                {folders
+                  .filter((folder) => folder._id !== moveFolderTarget._id)
+                  .map((folder) => (
+                    <button
+                      key={folder._id}
+                      className={cn(
+                        "flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border transition",
+                        moveFolderTarget.parent_id === folder._id
+                          ? "border-[#6c8eff]/30 bg-[#6c8eff1a] text-[#6c8eff]"
+                          : "border-gray-600 bg-transparent text-gray-400 hover:bg-gray-800"
+                      )}
+                      onClick={() => moveFolder(moveFolderTarget, folder._id)}
+                    >
+                      {folder.name}
+                    </button>
+                  ))}
+              </div>
+              <button
+                className={cn(
+                  "mt-4 w-full px-4 py-2 text-sm font-medium rounded-lg",
+                  "border border-gray-600 text-gray-400 hover:bg-gray-800 hover:text-white"
+                )}
+                onClick={() => setMoveFolderTarget(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {versionTarget && (
+          <div className="fixed inset-0 bg-black/65 flex items-center justify-center z-50 animate-[fadeIn_0.15s_ease]" onClick={() => setVersionTarget(null)}>
+            <div className={cn("bg-[#1a1e28] border border-[#252a38] rounded-xl p-6 w-full max-w-sm", "animate-[slideUp_0.2s_ease]")} onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-lg font-semibold text-[#e8eaf0] mb-2">Version history</h3>
+              <p className="text-sm text-[#6b7280] mb-4">Every saved version of <span>{versionTarget.filename}</span> is visible here.</p>
+              <div className="flex flex-col gap-2 max-h-56 overflow-y-auto">
+                {versionsLoading ? (
+                  <div className="text-xs text-[#6b7280] py-4">Loading versions...</div>
+                ) : versions.length === 0 ? (
+                  <div className="text-xs text-[#6b7280] py-4">No versions recorded yet.</div>
+                ) : (
+                  versions.map((version) => (
+                    <button
+                      key={version.id}
+                      className={cn(
+                        "flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border transition",
+                        version.isCurrent
+                          ? "border-[#6c8eff]/30 bg-[#6c8eff1a] text-[#6c8eff]"
+                          : "border-gray-600 bg-transparent text-gray-400 hover:bg-gray-800"
+                      )}
+                      onClick={() => openVersionUrl(version)}
+                    >
+                      v{version.version}
+                      <span className="text-xs text-[#6b7280] ml-auto">
+                        {version.isCurrent ? "Current" : new Date(version.uploadedAt).toLocaleDateString()}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+              <button
+                className={cn(
+                  "mt-4 w-full px-4 py-2 text-sm font-medium rounded-lg",
+                  "border border-gray-600 text-gray-400 hover:bg-gray-800 hover:text-white"
+                )}
+                onClick={() => setVersionTarget(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
+        {deleteTarget && (
+          <div className="fixed inset-0 bg-black/65 flex items-center justify-center z-50 animate-[fadeIn_0.15s_ease]" onClick={() => setDeleteTarget(null)}>
+            <div className={cn("bg-[#1a1e28] border border-[#252a38] rounded-xl p-6 w-full max-w-sm", "animate-[slideUp_0.2s_ease]")} onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-lg font-semibold text-[#e8eaf0] mb-2">Confirm delete</h3>
+              <p className="text-sm text-[#6b7280] mb-6">
+                {deleteTarget.type === "file"
+                  ? `Delete "${(deleteTarget.item as FileType).filename}"? This cannot be undone.`
+                  : `Delete folder "${deleteTarget.item.name}" and all its contents? This cannot be undone.`}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  className={cn(
+                    "flex-1 px-4 py-2 text-sm font-medium rounded-lg",
+                    "border border-gray-600 text-gray-400 hover:bg-gray-800 hover:text-white"
+                  )}
+                  onClick={() => setDeleteTarget(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={cn(
+                    "flex-1 px-4 py-2 text-sm font-medium rounded-lg",
+                    "border border-red-600/30 bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                  )}
+                  onClick={confirmDelete}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {toast && (
+          <div
+            className={cn(
+              "fixed bottom-7 right-7 z-50 rounded-xl px-4 py-3 text-sm font-medium",
+              "flex items-center gap-2 max-w-xs",
+              "border",
+              toast.type === "success"
+                ? "border-green-500/30 bg-green-500/10 text-green-400"
+                : toast.type === "warn"
+                  ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-400"
+                  : "border-red-500/30 bg-red-500/10 text-red-400"
+            )}
+          >
+            <span className="text-xl font-bold">
+              {toast.type === "success" ? "✓" : toast.type === "warn" ? "!" : "✕"}
+            </span>
+            {toast.msg}
+          </div>
+        )}
+      </div>
     </>
   );
 }
