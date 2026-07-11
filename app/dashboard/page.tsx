@@ -1,37 +1,36 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import FileSearch from "@/components/ui/filesearch";
+import {
+  Archive,
+  ChevronDown,
+  Download,
+  File,
+  FileText,
+  Folder,
+  Image as ImageIcon,
+  MoreHorizontal,
+  Search,
+  Share2,
+  Video,
+} from "lucide-react";
 import FileUpload from "@/components/ui/fileupload";
-import { cn } from "@/shared/utils";
 
 type FileType = {
   _id: string;
   filename: string;
   mimetype: string;
   size: number;
-  hash?: string;
   storageUrl: string;
-  owner_id: string;
   status: "pending" | "uploading" | "paused" | "fallback_cleanup" | "s3_pending" | "uploaded" | "cancelled" | "failed";
   folderId: string | null;
   createdAt: string;
-  backend?: "s3" | "telegram";
 };
 
-type FolderType = {
-  _id: string;
-  name: string;
-  owner_id: string;
-  parent_id?: string | null;
-  createdAt: string;
-};
-
-type ToastMsg = { msg: string; type: "error" | "warn" | "success" };
-type ContextMenu = { x: number; y: number; item: FileType | FolderType; itemType: "file" | "folder" };
+type MenuTarget = { x: number; y: number; file: FileType };
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -40,229 +39,178 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-function getFileIcon(mimetype: string): string {
-  if (mimetype.startsWith("image/")) return "[IMG]";
-  if (mimetype.startsWith("video/")) return "[VID]";
-  if (mimetype.startsWith("audio/")) return "[AUD]";
-  if (mimetype.includes("pdf")) return "[PDF]";
-  if (mimetype.includes("zip") || mimetype.includes("compressed")) return "[ARC]";
-  if (mimetype.includes("word") || mimetype.includes("document")) return "[DOC]";
-  if (mimetype.includes("sheet") || mimetype.includes("excel")) return "[SHT]";
-  return "[FILE]";
+function formatDate(value: string): string {
+  return new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function FileTypeIcon({ mimetype }: { mimetype: string }) {
+  const iconClass = "h-5 w-5";
+  const wrapperClass = "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl";
+
+  if (mimetype.startsWith("video/")) return <div className={`${wrapperClass} bg-violet-500/15 text-violet-300`}><Video className={iconClass} /></div>;
+  if (mimetype.startsWith("image/")) return <div className={`${wrapperClass} bg-emerald-500/15 text-emerald-300`}><ImageIcon className={iconClass} /></div>;
+  if (mimetype.includes("pdf")) return <div className={`${wrapperClass} bg-red-500/15 text-red-300`}><FileText className={iconClass} /></div>;
+  if (mimetype.includes("zip") || mimetype.includes("compressed") || mimetype.includes("rar")) return <div className={`${wrapperClass} bg-amber-500/15 text-amber-300`}><Archive className={iconClass} /></div>;
+  if (mimetype.includes("word") || mimetype.includes("document") || mimetype.includes("text")) return <div className={`${wrapperClass} bg-blue-500/15 text-blue-300`}><FileText className={iconClass} /></div>;
+  return <div className={`${wrapperClass} bg-slate-500/15 text-slate-300`}><File className={iconClass} /></div>;
 }
 
 export default function DashboardPage() {
   const router = useRouter();
   const { status: sessionStatus } = useSession();
   const isAuthenticated = sessionStatus === "authenticated";
-
-  const [showSearch, setShowSearch] = useState(false);
-  const [ctxMenu, setCtxMenu] = useState<ContextMenu | null>(null);
-  const [toast, setToast] = useState<ToastMsg | null>(null);
-  const [currentFolderId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(t);
-  }, [toast]);
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [sortOrder, setSortOrder] = useState("recent");
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [menu, setMenu] = useState<MenuTarget | null>(null);
 
   useEffect(() => {
-    if (!ctxMenu) return;
-    const close = () => setCtxMenu(null);
+    const close = () => setMenu(null);
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
-  }, [ctxMenu]);
+  }, []);
 
-  const { data: dashboard, isLoading: dashboardLoading } = useQuery<{
-    files: FileType[];
-    folders: FolderType[];
-    pendingFiles: FileType[];
-  }>({
+  const { data: dashboard, isLoading } = useQuery<{ files: FileType[] }>({
     queryKey: ["dashboard"],
     queryFn: async () => {
-      const res = await fetch("/api/dashboard");
-      if (!res.ok) throw new Error("Failed to load dashboard");
-      return res.json();
+      const response = await fetch("/api/dashboard");
+      if (!response.ok) throw new Error("Failed to load dashboard");
+      return response.json();
     },
     enabled: isAuthenticated,
     refetchInterval: 15000,
   });
 
-  const files = dashboard?.files ?? [];
-  const folders = dashboard?.folders ?? [];
-  const uploadedFiles = files.filter((f) => f.status === "uploaded");
-  const visibleFiles = uploadedFiles.filter((f) => f.folderId === currentFolderId);
-  const currentFolder = folders.find((f) => f._id === currentFolderId);
+  const files = useMemo(() => dashboard?.files ?? [], [dashboard?.files]);
+  const visibleFiles = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    const filtered = files.filter((file) => {
+      if (file.status !== "uploaded" || file.folderId !== null) return false;
+      if (normalizedSearch && !file.filename.toLowerCase().includes(normalizedSearch)) return false;
+      if (typeFilter === "images") return file.mimetype.startsWith("image/");
+      if (typeFilter === "videos") return file.mimetype.startsWith("video/");
+      if (typeFilter === "documents") return file.mimetype.includes("pdf") || file.mimetype.includes("document") || file.mimetype.includes("word");
+      if (typeFilter === "archives") return file.mimetype.includes("zip") || file.mimetype.includes("compressed") || file.mimetype.includes("rar");
+      return true;
+    });
+
+    return filtered.sort((a, b) => {
+      if (sortOrder === "name") return a.filename.localeCompare(b.filename);
+      if (sortOrder === "size") return b.size - a.size;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [files, search, sortOrder, typeFilter]);
 
   const handleLogout = async () => {
-    await fetch('/api/auth/signout');
-    router.push('/sign_in');
-  };
-
-  const handleUploadComplete = () => {
-    // Trigger refetch to show newly uploaded file
-    // useQuery will auto-refetch due to refetchInterval
-  };
-
-  const openCtx = (e: React.MouseEvent, item: FileType | FolderType, itemType: "file" | "folder") => {
-    e.preventDefault();
-    e.stopPropagation();
-    const menuWidth = 160;
-    const menuHeight = 280;
-    let left = e.clientX;
-    let top = e.clientY;
-    if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - 8 - menuWidth;
-    if (top + menuHeight > window.innerHeight) {
-      top = e.clientY - 6 - menuHeight;
-      if (top < 8) top = 8;
-    }
-    if (left < 8) left = 8;
-    setCtxMenu({ x: left, y: top, item, itemType });
+    await fetch("/api/auth/signout");
+    router.push("/sign_in");
   };
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#0a0b0f] px-4 py-5 text-[#e8eaf0] sm:px-6 sm:py-8">
-      <div aria-hidden="true" className="pointer-events-none absolute -top-40 -left-32 h-[600px] w-[600px] rounded-full bg-indigo-500/20 blur-[120px]" />
-      <div aria-hidden="true" className="pointer-events-none absolute -bottom-28 -right-20 h-[500px] w-[500px] rounded-full bg-violet-500/15 blur-[120px]" />
-
-      {showSearch && <FileSearch onClose={() => setShowSearch(false)} topOffset={16} />}
-
-      <div className="relative z-10 mx-auto w-full max-w-5xl">
-        <header className="flex items-center justify-between border-b border-[#252a38] pb-5">
-          <h1 className="bg-gradient-to-r from-white to-indigo-400 bg-clip-text text-[1.5rem] font-bold tracking-tight text-transparent">
-            StoreIt
-          </h1>
-          <button
-            className="rounded-lg border border-red-400/20 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 transition hover:bg-red-500/20"
-            onClick={handleLogout}
-          >
-            Logout
-          </button>
+    <main className="min-h-screen bg-[linear-gradient(180deg,#0b1220_0%,#111827_100%)] px-4 py-5 text-slate-100 sm:px-8 sm:py-8">
+      <div className="mx-auto w-full max-w-[1440px]">
+        <header className="flex items-center justify-between border-b border-slate-700/70 pb-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500 text-lg font-bold text-white shadow-lg shadow-indigo-950/30">S</div>
+            <h1 className="text-xl font-semibold tracking-tight text-white">StoreIt</h1>
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setProfileOpen((open) => !open)}
+              className="flex h-10 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-3 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-800"
+              aria-expanded={profileOpen}
+            >
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/20 text-xs font-semibold text-indigo-200">U</span>
+              <span className="hidden sm:inline">Profile</span>
+              <ChevronDown className="h-4 w-4 text-slate-400" />
+            </button>
+            {profileOpen && (
+              <div className="absolute right-0 top-12 z-30 w-44 rounded-xl border border-slate-700 bg-[#111827] p-1.5 shadow-2xl shadow-black/30">
+                <button type="button" onClick={handleLogout} className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 transition hover:bg-red-500/10 hover:text-red-200">Log out</button>
+              </div>
+            )}
+          </div>
         </header>
 
-        <section className="mx-auto mt-8 flex w-full max-w-4xl flex-col gap-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <section className="py-8">
+          <h2 className="text-3xl font-bold tracking-tight text-white">Storage</h2>
+          <p className="mt-2 text-base text-slate-400">Upload, organize, and share your files from one place.</p>
+        </section>
+
+        <section className="grid gap-3 border-y border-slate-700/70 py-5 lg:grid-cols-[minmax(320px,1fr)_160px_160px]">
+          <label className="flex h-11 items-center gap-3 rounded-xl border border-slate-700 bg-slate-900/70 px-3 text-slate-400 transition focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-400/20">
+            <Search className="h-5 w-5" />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500" placeholder="Search files..." />
+          </label>
+          <label className="relative">
+            <span className="sr-only">Filter files</span>
+            <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="h-11 w-full appearance-none rounded-xl border border-slate-700 bg-slate-900/70 px-3 pr-9 text-sm text-slate-200 outline-none transition hover:border-slate-600 focus:border-indigo-400">
+              <option value="all">All files</option>
+              <option value="images">Images</option>
+              <option value="videos">Videos</option>
+              <option value="documents">Documents</option>
+              <option value="archives">Archives</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-slate-400" />
+          </label>
+          <label className="relative">
+            <span className="sr-only">Sort files</span>
+            <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} className="h-11 w-full appearance-none rounded-xl border border-slate-700 bg-slate-900/70 px-3 pr-9 text-sm text-slate-200 outline-none transition hover:border-slate-600 focus:border-indigo-400">
+              <option value="recent">Recently uploaded</option>
+              <option value="name">Name</option>
+              <option value="size">Size</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-slate-400" />
+          </label>
+        </section>
+
+        <section className="py-8">
+          <FileUpload currentFolderId={null} />
+        </section>
+
+        <section className="pb-8">
+          <div className="mb-5 flex items-end justify-between">
             <div>
-              <p className="text-sm font-medium text-[#e8eaf0]">Storage</p>
-              <p className="mt-1 text-sm text-[#6b7280]">Upload, organize, and share your files.</p>
+              <p className="text-sm font-medium text-indigo-300">Recently uploaded</p>
+              <h2 className="mt-1 text-xl font-semibold text-white">Files ({visibleFiles.length})</h2>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                className="rounded-lg border border-gray-600 bg-transparent px-3 py-1.5 text-xs font-medium text-gray-400 transition hover:bg-gray-800"
-                onClick={() => setShowSearch(true)}
-                aria-label="Search files"
-              >
-                <svg className="inline-block w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21L14.35 14.35"/></svg>
-              </button>
-              <button
-                className="rounded-lg border border-gray-600 bg-transparent px-3 py-1.5 text-xs font-medium text-gray-400 transition hover:bg-gray-800"
-                onClick={() => router.push("/all-files")}
-                aria-label="View all files"
-              >
-                All files
-              </button>
-              <button
-                className="rounded-lg border border-[#6c8eff]/30 bg-[#6c8eff1a] px-3 py-1.5 text-xs font-medium text-[#6c8eff] transition hover:bg-[#6c8eff25]"
-                onClick={() => router.push("/sidebar")}
-                aria-label="Browse by type"
-              >
-                Browse by type
-              </button>
+            <button type="button" onClick={() => router.push("/all-files")} className="text-sm font-medium text-indigo-300 transition hover:text-indigo-200">View all</button>
+          </div>
+
+          {isLoading ? (
+            <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-6 text-sm text-slate-400">Loading files...</div>
+          ) : visibleFiles.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-600 bg-slate-900/40 py-16 text-center">
+              <Folder className="mx-auto h-10 w-10 text-slate-500" />
+              <p className="mt-3 text-sm text-slate-400">No files match your current filters.</p>
             </div>
-
-          </div>
-
-          <div className="rounded-xl border border-[#252a38] bg-[#11141c]/80 p-4 sm:p-5">
-            <FileUpload currentFolderId={currentFolderId} onUploadComplete={handleUploadComplete} />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-[#e8eaf0]">Files</h2>
-            <span className="text-sm text-[#6b7280]">{visibleFiles.length} file{visibleFiles.length !== 1 ? "s" : ""}</span>
-          </div>
-
-          {dashboardLoading ? (
-            <div className="rounded-xl border border-[#252a38] bg-[#13161e] p-5 text-sm text-[#6b7280]">Loading files…</div>
-            ) : visibleFiles.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-[#252a38] py-12 text-center text-sm text-[#6b7280]">
-                <div className="text-2xl mb-4 opacity-40">📂</div>
-                <div>{currentFolder ? "No files in this folder yet" : "No files uploaded yet"}</div>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {visibleFiles.slice(0, 10).map((file) => (
-                  <div
-                    key={file._id}
-                    onContextMenu={(e) => openCtx(e, file, "file")}
-                    className="flex items-center gap-3 rounded-xl border border-[#252a38] bg-[#13161e] px-3 py-3 transition-colors hover:border-[#3b4355]"
-                  >
-                    <div className="text-[20px] flex-shrink-0">{getFileIcon(file.mimetype)}</div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[0.85rem] font-medium text-[#e8eaf0] truncate">{file.filename}</div>
-                      <div className="text-[0.7rem] text-[#6b7280] truncate">
-                        {formatBytes(file.size)} - {new Date(file.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <button
-                        className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition border-[#6c8eff]/30 bg-[#6c8eff1a] text-[#6c8eff] hover:bg-[#6c8eff25]"
-                        onClick={() => {}}
-                      >
-                        Open
-                      </button>
-                      <button
-                        className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition border-green-600/30 bg-green-500/10 text-green-400 hover:bg-green-500/20"
-                        onClick={() => {}}
-                      >
-                        Share
-                      </button>
-                      <button
-                        className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition border-[#252a38] text-[#6b7280] bg-[#13161e] hover:bg-[#1a1e28] focus:outline-none focus:ring-2 focus:ring-[#6c8eff] focus:ring-offset-2"
-                        aria-label="Open file options menu"
-                        aria-haspopup="true"
-                        aria-expanded={false}
-                        onClick={(e) => {
-                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                          const menuWidth = 160;
-                          let left = rect.right - menuWidth;
-                          if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - 8 - menuWidth;
-                          if (left < 8) left = 8;
-                          const menuHeight = 280;
-                          let top = rect.bottom + 6;
-                          if (top + menuHeight > window.innerHeight) {
-                            top = rect.top - 6 - menuHeight;
-                            if (top < 8) top = 8;
-                          }
-                          setCtxMenu({ x: left, y: top, item: file, itemType: "file" });
-                        }}
-                      >
-                        ⋮
-                      </button>
-                    </div>
+          ) : (
+            <div className="space-y-3">
+              {visibleFiles.map((file) => (
+                <article key={file._id} className="group flex min-h-[76px] flex-col gap-4 rounded-xl border border-slate-700 bg-[#111827] p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-400/60 hover:shadow-lg hover:shadow-indigo-950/20 sm:flex-row sm:items-center">
+                  <FileTypeIcon mimetype={file.mimetype} />
+                  <div className="min-w-0 flex-1">
+                    <h3 className="truncate text-base font-semibold text-slate-100">{file.filename}</h3>
+                    <p className="mt-1 text-sm text-slate-400">{formatBytes(file.size)} <span className="px-1.5 text-slate-600">•</span> {formatDate(file.createdAt)}</p>
                   </div>
-                ))}
-              </div>
+                  <div className="flex items-center gap-2 sm:ml-auto">
+                    <button type="button" className="rounded-lg bg-indigo-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-400">Open</button>
+                    <button type="button" aria-label={`Download ${file.filename}`} className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"><Download className="h-4 w-4" /></button>
+                    <button type="button" aria-label={`Share ${file.filename}`} className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"><Share2 className="h-4 w-4" /></button>
+                    <button type="button" aria-label={`More actions for ${file.filename}`} onClick={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); setMenu({ file, x: rect.right - 176, y: rect.bottom + 8 }); }} className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"><MoreHorizontal className="h-5 w-5" /></button>
+                  </div>
+                </article>
+              ))}
+            </div>
           )}
         </section>
       </div>
 
-      {toast && (
-        <div
-          className={cn(
-            "fixed bottom-7 right-7 z-50 rounded-xl px-4 py-3 text-sm font-medium",
-            "flex items-center gap-2 max-w-xs border",
-            toast.type === "success"
-              ? "border-green-500/30 bg-green-500/10 text-green-400"
-              : toast.type === "warn"
-                ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-400"
-                : "border-red-500/30 bg-red-500/10 text-red-400"
-          )}
-        >
-          <span className="text-xl font-bold">
-            {toast.type === "success" ? "✓" : toast.type === "warn" ? "!" : "✕"}
-          </span>
-          {toast.msg}
+      {menu && (
+        <div className="fixed z-50 w-44 rounded-xl border border-slate-700 bg-[#111827] p-1.5 shadow-2xl shadow-black/40" style={{ left: Math.max(12, menu.x), top: menu.y }} onClick={(event) => event.stopPropagation()}>
+          {['Open', 'Download', 'Share', 'Rename', 'Delete'].map((action) => <button key={action} type="button" onClick={() => setMenu(null)} className={`w-full rounded-lg px-3 py-2 text-left text-sm transition hover:bg-slate-800 ${action === 'Delete' ? 'text-red-300 hover:bg-red-500/10' : 'text-slate-200'}`}>{action}</button>)}
         </div>
       )}
     </main>

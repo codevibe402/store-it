@@ -12,6 +12,7 @@ import { getFileHash } from "@/client/lib/hash";
 import { resumeUpload, getFileForResume } from "@/app/resume/page";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { CloudUpload, FileText, LoaderCircle } from "lucide-react";
 
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 const CHUNK_SIZE = 10 * 1024 * 1024;
@@ -205,9 +206,8 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
     <div className="flex flex-col gap-6">
       <div
         className={cn(
-          "rounded-xl border-dashed transition-all duration-200 cursor-pointer",
-          "border-[1.5px] px-8 py-10 text-center gap-2 flex flex-col items-center justify-center",
-          dragging ? "border-accent border-solid bg-[#6c8eff1a] transform -translate-y-1" : "border-[#252a38]"
+          "flex min-h-[240px] cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-8 text-center transition-all duration-200",
+          dragging ? "border-indigo-400 bg-indigo-500/10 -translate-y-0.5" : "border-slate-600 bg-slate-900/50 hover:border-indigo-400/70 hover:bg-slate-900"
         )}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
@@ -215,39 +215,43 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
         onClick={() => inputRef.current?.click()}
       >
         <input ref={inputRef} type="file" hidden onChange={(e) => { e.preventDefault(); if (e.target.files?.[0]) handleFileSelect(e.target.files[0]); }} />
-        <div className="w-12 h-12 rounded-xl bg-[#1a1e28] border border-[#252a38] flex items-center justify-center">
-          <svg className="w-6 h-6 text-[#6c8eff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-indigo-400/20 bg-indigo-500/15 text-indigo-300">
+          <CloudUpload className="h-7 w-7" />
         </div>
-        <div className="text-[0.95rem] font-semibold text-[#e8eaf0]">
-          Drop your file here{currentFolderIdState ? ` into "${currentFolder?.name}"` : ""}
+        <div className="text-lg font-semibold text-slate-100">
+          Drop files here{currentFolderIdState ? ` into "${currentFolder?.name}"` : ""}
         </div>
-        <div className="text-[0.78rem] text-[#6b7280] mb-2">
-          or <span className="text-[#6c8eff] font-medium">browse</span> — under 10 MB uploads instantly, larger files use multipart
+        <div className="text-sm text-slate-400">
+          or <span className="font-medium text-indigo-300">browse your computer</span>
+        </div>
+        <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-slate-500">
+          <span>Fast uploads</span><span>Resume supported</span><span>Large files supported</span>
         </div>
       </div>
 
       {/* Upload Progress / Pending Uploads */}
       {(visiblePendingFiles.length > 0 || status === "uploading") && (
         <div className="space-y-3">
-          <h3 className="text-[0.85rem] font-semibold text-[#e8eaf0]">Uploading</h3>
+          <h3 className="text-base font-semibold text-slate-100">Uploading</h3>
           {visiblePendingFiles.map((file) => (
-            <div key={file._id} className="bg-[#1a1e28] border border-[#252a38] rounded-xl p-4">
-              <div className="flex items-center gap-3">
-                <div className="text-[20px] flex-shrink-0">{getFileIcon(file.mimetype)}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[0.85rem] font-medium text-[#e8eaf0] truncate">{file.filename}</div>
-                  <div className="text-[0.7rem] text-[#6b7280] truncate">{formatBytes(file.size)}</div>
-                  <div className="w-full h-2 bg-[#0f1117] rounded-full mt-2 overflow-hidden">
+            <div key={file._id} className="rounded-xl border border-slate-700 bg-[#111827] p-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-500/15 text-red-300"><FileText className="h-5 w-5" /></div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-base font-semibold text-slate-100">{file.filename}</div>
+                  <div className="mt-1 flex items-center gap-2 text-sm text-slate-400"><LoaderCircle className="h-3.5 w-3.5 animate-spin text-indigo-300" /> Uploading... <span className="text-slate-500">{file.status === "uploading" ? `${progress}%` : "Preparing"}</span></div>
+                  <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-800">
                     <div
-                      className="h-full bg-[#6c8eff] rounded-full transition-all duration-300"
+                      className="h-full rounded-full bg-indigo-400 transition-all duration-300"
                       style={{ width: `${file.status === "uploading" ? progress : 0}%` }}
                     />
                   </div>
+                  <div className="mt-2 text-xs text-slate-500">{formatBytes(file.size)}</div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex shrink-0 items-center gap-2">
                   {file.status === "uploading" && (
                     <button
-                      className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition border-yellow-500/30 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20"
+                      className="rounded-lg px-3 py-2 text-sm font-medium text-amber-300 transition hover:bg-amber-500/10"
                       onClick={() => { pauseRef.current = true; }}
                     >
                       Pause
@@ -255,14 +259,14 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
                   )}
                   {file.status === "paused" && (
                     <button
-                      className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition border-[#6c8eff]/30 bg-[#6c8eff1a] text-[#6c8eff] hover:bg-[#6c8eff25]"
+                      className="rounded-lg px-3 py-2 text-sm font-medium text-indigo-300 transition hover:bg-indigo-500/10"
                       onClick={() => { /* resume logic */ }}
                     >
                       Resume
                     </button>
                   )}
                   <button
-                    className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                    className="rounded-lg px-3 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10"
                     onClick={() => { cancelledIds.current.add(file._id); }}
                   >
                     Cancel
