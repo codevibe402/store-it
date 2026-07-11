@@ -30,8 +30,6 @@ type FileType = {
   createdAt: string;
 };
 
-type MenuTarget = { x: number; y: number; file: FileType };
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -63,10 +61,10 @@ export default function DashboardPage() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [sortOrder, setSortOrder] = useState("recent");
   const [profileOpen, setProfileOpen] = useState(false);
-  const [menu, setMenu] = useState<MenuTarget | null>(null);
+  const [menuFileId, setMenuFileId] = useState<string | null>(null);
 
   useEffect(() => {
-    const close = () => setMenu(null);
+    const close = () => setMenuFileId(null);
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, []);
@@ -108,8 +106,11 @@ export default function DashboardPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[linear-gradient(180deg,#0b1220_0%,#111827_100%)] px-4 py-5 text-slate-100 sm:px-8 sm:py-8">
-      <div className="mx-auto w-full max-w-5xl">
+    <main
+      className="min-h-screen bg-[linear-gradient(180deg,#0b1220_0%,#111827_100%)] py-5 text-slate-100 sm:py-8"
+      style={{ paddingInline: "clamp(24px, 5vw, 96px)" }}
+    >
+      <div className="w-full max-w-5xl" style={{ marginInline: "auto" }}>
         <header className="flex items-center justify-between border-b border-slate-700/70 pb-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500 text-lg font-bold text-white shadow-lg shadow-indigo-950/30">S</div>
@@ -119,11 +120,11 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() => setProfileOpen((open) => !open)}
-              className="flex h-10 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-3 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-800"
+              className="flex h-9 items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/70 px-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-800"
               aria-expanded={profileOpen}
+              aria-label="Open profile menu"
             >
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/20 text-xs font-semibold text-indigo-200">U</span>
-              <span className="hidden sm:inline">Profile</span>
               <ChevronDown className="h-4 w-4 text-slate-400" />
             </button>
             {profileOpen && (
@@ -189,7 +190,7 @@ export default function DashboardPage() {
           ) : (
             <div className="space-y-3">
               {visibleFiles.map((file) => (
-                <article key={file._id} className="group flex min-h-[76px] flex-col gap-4 rounded-xl border border-slate-700 bg-[#111827] p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-400/60 hover:shadow-lg hover:shadow-indigo-950/20 sm:flex-row sm:items-center">
+                <article key={file._id} className="group relative flex min-h-[76px] flex-col gap-4 rounded-xl border border-slate-700 bg-[#111827] p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-400/60 hover:shadow-lg hover:shadow-indigo-950/20 sm:flex-row sm:items-center">
                   <FileTypeIcon mimetype={file.mimetype} />
                   <div className="min-w-0 flex-1">
                     <h3 className="truncate text-base font-semibold text-slate-100">{file.filename}</h3>
@@ -199,8 +200,13 @@ export default function DashboardPage() {
                     <button type="button" className="rounded-lg bg-indigo-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-400">Open</button>
                     <button type="button" aria-label={`Download ${file.filename}`} className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"><Download className="h-4 w-4" /></button>
                     <button type="button" aria-label={`Share ${file.filename}`} className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"><Share2 className="h-4 w-4" /></button>
-                    <button type="button" aria-label={`More actions for ${file.filename}`} onClick={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); setMenu({ file, x: rect.right - 176, y: rect.bottom + 8 }); }} className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"><MoreHorizontal className="h-5 w-5" /></button>
+                    <button type="button" aria-label={`More actions for ${file.filename}`} onClick={(event) => { event.stopPropagation(); setMenuFileId((current) => current === file._id ? null : file._id); }} className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"><MoreHorizontal className="h-5 w-5" /></button>
                   </div>
+                  {menuFileId === file._id && (
+                    <div className="absolute right-4 top-[calc(100%-0.25rem)] z-20 w-44 rounded-xl border border-slate-700 bg-[#111827] p-1.5 shadow-2xl shadow-black/40" onClick={(event) => event.stopPropagation()}>
+                      {['Open', 'Download', 'Share', 'Rename', 'Delete'].map((action) => <button key={action} type="button" onClick={() => setMenuFileId(null)} className={`w-full rounded-lg px-3 py-2 text-left text-sm transition hover:bg-slate-800 ${action === 'Delete' ? 'text-red-300 hover:bg-red-500/10' : 'text-slate-200'}`}>{action}</button>)}
+                    </div>
+                  )}
                 </article>
               ))}
             </div>
@@ -208,11 +214,6 @@ export default function DashboardPage() {
         </section>
       </div>
 
-      {menu && (
-        <div className="fixed z-50 w-44 rounded-xl border border-slate-700 bg-[#111827] p-1.5 shadow-2xl shadow-black/40" style={{ left: Math.max(12, menu.x), top: menu.y }} onClick={(event) => event.stopPropagation()}>
-          {['Open', 'Download', 'Share', 'Rename', 'Delete'].map((action) => <button key={action} type="button" onClick={() => setMenu(null)} className={`w-full rounded-lg px-3 py-2 text-left text-sm transition hover:bg-slate-800 ${action === 'Delete' ? 'text-red-300 hover:bg-red-500/10' : 'text-slate-200'}`}>{action}</button>)}
-        </div>
-      )}
     </main>
   );
 }
