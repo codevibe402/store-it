@@ -234,29 +234,23 @@ async function onSubmit(data: FormValues) {
         </form>
       </CardContent>
 
-      <CardFooter>
-        <Field orientation="horizontal">
+      <CardFooter className="flex flex-col gap-3">
+        <div className="flex gap-2">
           <Button type="button" variant="outline" onClick={() => form.reset()}>
             Reset
           </Button>
           <Button type="submit" form="form-rhf-demo">
             {type === "sign-in" ? "Sign In" : "Sign Up"}
           </Button>
-        </Field>
-      </CardFooter>
-
-      {/* Google Sign-In Button */}
-      <CardFooter>
-        <Field orientation="horizontal">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => signIn("google", { callbackUrl: `${window.location.origin}/dashboard` })}
-          >
-            Sign In with Google
-        
-          </Button>
-        </Field>
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-full"
+          onClick={() => signIn("google", { callbackUrl: `${window.location.origin}/dashboard` })}
+        >
+          Sign In with Google
+        </Button>
       </CardFooter>
     </Card>
   )
