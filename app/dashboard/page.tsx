@@ -109,7 +109,7 @@ export default function DashboardPage() {
 
   return (
     <main className="min-h-screen bg-[linear-gradient(180deg,#0b1220_0%,#111827_100%)] px-4 py-5 text-slate-100 sm:px-8 sm:py-8">
-      <div className="mx-auto w-full max-w-[1440px]">
+      <div className="mx-auto w-full max-w-5xl">
         <header className="flex items-center justify-between border-b border-slate-700/70 pb-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500 text-lg font-bold text-white shadow-lg shadow-indigo-950/30">S</div>
@@ -134,12 +134,12 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        <section className="py-8">
+        <section className="mx-auto max-w-4xl py-8">
           <h2 className="text-3xl font-bold tracking-tight text-white">Storage</h2>
           <p className="mt-2 text-base text-slate-400">Upload, organize, and share your files from one place.</p>
         </section>
 
-        <section className="grid gap-3 border-y border-slate-700/70 py-5 lg:grid-cols-[minmax(320px,1fr)_160px_160px]">
+        <section className="mx-auto grid max-w-4xl gap-3 border-y border-slate-700/70 py-5 lg:grid-cols-[minmax(320px,1fr)_160px_160px]">
           <label className="flex h-11 items-center gap-3 rounded-xl border border-slate-700 bg-slate-900/70 px-3 text-slate-400 transition focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-400/20">
             <Search className="h-5 w-5" />
             <input value={search} onChange={(event) => setSearch(event.target.value)} className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500" placeholder="Search files..." />
@@ -166,11 +166,11 @@ export default function DashboardPage() {
           </label>
         </section>
 
-        <section className="py-8">
+        <section className="mx-auto max-w-4xl py-8">
           <FileUpload currentFolderId={null} />
         </section>
 
-        <section className="pb-8">
+        <section className="mx-auto max-w-4xl pb-8">
           <div className="mb-5 flex items-end justify-between">
             <div>
               <p className="text-sm font-medium text-indigo-300">Recently uploaded</p>

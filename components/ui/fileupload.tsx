@@ -206,7 +206,7 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
     <div className="flex flex-col gap-6">
       <div
         className={cn(
-          "flex min-h-[240px] cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-8 text-center transition-all duration-200",
+          "flex min-h-[180px] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-8 text-center transition-all duration-200",
           dragging ? "border-indigo-400 bg-indigo-500/10 -translate-y-0.5" : "border-slate-600 bg-slate-900/50 hover:border-indigo-400/70 hover:bg-slate-900"
         )}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -215,8 +215,8 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
         onClick={() => inputRef.current?.click()}
       >
         <input ref={inputRef} type="file" hidden onChange={(e) => { e.preventDefault(); if (e.target.files?.[0]) handleFileSelect(e.target.files[0]); }} />
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-indigo-400/20 bg-indigo-500/15 text-indigo-300">
-          <CloudUpload className="h-7 w-7" />
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-indigo-400/20 bg-indigo-500/15 text-indigo-300">
+          <CloudUpload className="h-6 w-6" />
         </div>
         <div className="text-lg font-semibold text-slate-100">
           Drop files here{currentFolderIdState ? ` into "${currentFolder?.name}"` : ""}
@@ -224,7 +224,7 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
         <div className="text-sm text-slate-400">
           or <span className="font-medium text-indigo-300">browse your computer</span>
         </div>
-        <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-slate-500">
+        <div className="mt-1 flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-slate-500">
           <span>Fast uploads</span><span>Resume supported</span><span>Large files supported</span>
         </div>
       </div>
