@@ -4,15 +4,13 @@ import { useState, useRef, useEffect, DragEvent, ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import { useReducer } from "react"
-import { storeFile, getFile, removeFile } from "@/client/lib/indexedDB";
-import { resumeHandleCache, resumeFileCache } from "@/client/lib/resumeCache";
-import { resumeTelegramUpload } from "@/client/lib/telegramWorker";
-import { getFileHash } from "@/client/lib/hash";
-import { resumeUpload, getFileForResume } from "@/app/resume/page";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { CloudUpload, FileText, LoaderCircle } from "lucide-react";
+import { useUpload } from "@/hooks/useUpload";
+import { useFiles } from "@/hooks/useFiles";
+import { useFolders } from "@/hooks/useFolders";
+import { ShareDialog, DeleteDialog, VersionsDialog, MoveDialog } from "@/components/dialogs";
 
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 const CHUNK_SIZE = 10 * 1024 * 1024;
@@ -39,12 +37,7 @@ type FolderType = {
   createdAt: string;
 };
 
-type UploadStatus = "idle" | "uploading" | "paused" | "success" | "error" | "duplicate";
-type VersionInfo = { id: string; version: number; uploadedAt: string; storageUrl: string; isCurrent: boolean };
-type ToastMsg = { msg: string; type: "error" | "warn" | "success" };
 type ContextMenu = { x: number; y: number; item: FileType | FolderType; itemType: "file" | "folder" };
-type ShareTarget = { type: "file"; item: FileType } | { type: "folder"; item: FolderType };
-type DeleteTarget = { type: "file"; item: FileType } | { type: "folder"; item: FolderType };
 
 function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs.filter(Boolean)));
@@ -81,68 +74,8 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
 
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [status, setStatus] = useState<UploadStatus>("idle");
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState("");
-  const [duplicateFile, setDuplicateFile] = useState<FileType | null>(null);
-  const [currentFileName, setCurrentFileName] = useState("");
-  const [showPending, setShowPending] = useState(false);
-  const [resumingId, setResumingId] = useState<string | null>(null);
-  const [toast, setToast] = useState<ToastMsg | null>(null);
 
   const [currentFolderIdState, setCurrentFolderIdState] = useState<string | null>(currentFolderId);
-  const [newFolderName, setNewFolderName] = useState("");
-  const [showNewFolder, setShowNewFolder] = useState(false);
-  const [moveNewFolderName, setMoveNewFolderName] = useState("");
-
-  const [ctxMenu, setCtxMenu] = useState<ContextMenu | null>(null);
-  const [moveTarget, setMoveTarget] = useState<FileType | null>(null);
-  const [moveFolderTarget, setMoveFolderTarget] = useState<FolderType | null>(null);
-  const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
-  const [shareUrl, setShareUrl] = useState("");
-  const [shareCopied, setShareCopied] = useState(false);
-  const [sharePermission, setSharePermission] = useState<"read" | "add">("read");
-  const [shareExpiresInDays, setShareExpiresInDays] = useState(7);
-  const [versionTarget, setVersionTarget] = useState<FileType | null>(null);
-  const [versions, setVersions] = useState<VersionInfo[]>([]);
-  const [versionsLoading, setVersionsLoading] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
-
-  const [showSearch, setShowSearch] = useState(false);
-  const [searchTop, setSearchTop] = useState(80);
-  const [storageType, setStorageType] = useState<"s3" | "telegram">("telegram");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const cancelRef = useRef(false);
-  const pauseRef = useRef(false);
-  const abortRef = useRef<AbortController | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const fileHandleRef = useRef<FileSystemFileHandle | null>(null);
-  const currentFileIdRef = useRef<string | null>(null);
-  const currentUploadRef = useRef<{ backend: "s3" | "telegram"; fileId: string; uploadId?: string; key?: string } | null>(null);
-  const pausedFileRef = useRef<{ fileId: string; filename: string } | null>(null);
-  const cancelledIds = useRef(new Set<string>());
-  const currentFileNameRef = useRef<string>("");
-  const hasAttemptedAutoResume = useRef(false);
-
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(t);
-  }, [toast]);
-
-  useEffect(() => {
-    if (!ctxMenu) return;
-    const close = () => setCtxMenu(null);
-    window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
-  }, [ctxMenu]);
-
-  useEffect(() => {
-    const close = () => { setOpenMenuId(null); setMenuPos(null); };
-    window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
-  }, []);
 
   useEffect(() => {
     setCurrentFolderIdState(currentFolderId);
@@ -166,19 +99,20 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
   const files = dashboard?.files ?? [];
   const folders = dashboard?.folders ?? [];
   const pendingFiles = dashboard?.pendingFiles ?? [];
-  const visiblePendingFiles = pendingFiles.filter((f) => !cancelledIds.current.has(f._id));
-  const filesLoading = dashboardLoading;
-  const foldersLoading = dashboardLoading;
 
-  const uploadedFiles = files.filter((f) => f.status === "uploaded");
-  const visibleFiles = uploadedFiles.filter((f) => f.folderId === currentFolderIdState);
-  const visibleFolders = folders.filter((folder) => (folder.parent_id ?? null) === currentFolderIdState);
+  const uploadHook = useUpload(currentFolderIdState);
+  const fileActions = useFiles(files, folders);
+  const folderActions = useFolders(folders, currentFolderIdState);
+
+  const visiblePendingFiles = pendingFiles.filter((f) => !uploadHook.cancelledIds.current.has(f._id));
   const currentFolder = folders.find((f) => f._id === currentFolderIdState);
 
-  const handleLogout = async () => {
-    await fetch('/api/auth/signout');
-    router.push('/sign_in');
-  };
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const [ctxMenu, setCtxMenu] = useState<ContextMenu | null>(null);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [showNewFolder, setShowNewFolder] = useState(false);
 
   const openCtx = (e: React.MouseEvent, item: FileType | FolderType, itemType: "file" | "folder") => {
     e.preventDefault();
@@ -196,11 +130,6 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
     setCtxMenu({ x: left, y: top, item, itemType });
   };
 
-  // File upload logic (keeping existing implementation)
-  const handleFileSelect = async (file: File) => {
-    // ... upload logic remains unchanged
-  };
-
   // Render only the upload dropzone and pending uploads
   return (
     <div className="flex flex-col gap-6">
@@ -211,10 +140,10 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
         )}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
-        onDrop={(e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) handleFileSelect(e.dataTransfer.files[0]); }}
+        onDrop={(e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) uploadHook.handleFile(e.dataTransfer.files[0]); }}
         onClick={() => inputRef.current?.click()}
       >
-        <input ref={inputRef} type="file" hidden onChange={(e) => { e.preventDefault(); if (e.target.files?.[0]) handleFileSelect(e.target.files[0]); }} />
+        <input ref={inputRef} type="file" hidden onChange={(e) => { e.preventDefault(); if (e.target.files?.[0]) uploadHook.handleFile(e.target.files[0]); }} />
         <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-indigo-400/20 bg-indigo-500/15 text-indigo-300">
           <CloudUpload className="h-6 w-6" />
         </div>
@@ -230,7 +159,7 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
       </div>
 
       {/* Upload Progress / Pending Uploads */}
-      {(visiblePendingFiles.length > 0 || status === "uploading") && (
+      {(visiblePendingFiles.length > 0 || uploadHook.status === "uploading") && (
         <div className="space-y-3">
           <h3 className="text-base font-semibold text-slate-100">Uploading</h3>
           {visiblePendingFiles.map((file) => (
@@ -239,11 +168,11 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-500/15 text-red-300"><FileText className="h-5 w-5" /></div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-base font-semibold text-slate-100">{file.filename}</div>
-                  <div className="mt-1 flex items-center gap-2 text-sm text-slate-400"><LoaderCircle className="h-3.5 w-3.5 animate-spin text-indigo-300" /> Uploading... <span className="text-slate-500">{file.status === "uploading" ? `${progress}%` : "Preparing"}</span></div>
+                  <div className="mt-1 flex items-center gap-2 text-sm text-slate-400"><LoaderCircle className="h-3.5 w-3.5 animate-spin text-indigo-300" /> Uploading... <span className="text-slate-500">{file.status === "uploading" ? `${uploadHook.progress}%` : "Preparing"}</span></div>
                   <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-800">
                     <div
                       className="h-full rounded-full bg-indigo-400 transition-all duration-300"
-                      style={{ width: `${file.status === "uploading" ? progress : 0}%` }}
+                      style={{ width: `${file.status === "uploading" ? uploadHook.progress : 0}%` }}
                     />
                   </div>
                   <div className="mt-2 text-xs text-slate-500">{formatBytes(file.size)}</div>
@@ -252,7 +181,7 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
                   {file.status === "uploading" && (
                     <button
                       className="rounded-lg px-3 py-2 text-sm font-medium text-amber-300 transition hover:bg-amber-500/10"
-                      onClick={() => { pauseRef.current = true; }}
+                      onClick={() => { uploadHook.pauseUpload(); }}
                     >
                       Pause
                     </button>
@@ -260,14 +189,14 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
                   {file.status === "paused" && (
                     <button
                       className="rounded-lg px-3 py-2 text-sm font-medium text-indigo-300 transition hover:bg-indigo-500/10"
-                      onClick={() => { /* resume logic */ }}
+                      onClick={() => { uploadHook.setResumingId(file._id); }}
                     >
                       Resume
                     </button>
                   )}
                   <button
                     className="rounded-lg px-3 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10"
-                    onClick={() => { cancelledIds.current.add(file._id); }}
+                    onClick={() => { uploadHook.cancelledIds.current.add(file._id); }}
                   >
                     Cancel
                   </button>
@@ -278,145 +207,83 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
         </div>
       )}
 
-      {/* Context Menu */}
-      {ctxMenu && (
-        <div
-          className={cn(
-            "fixed z-[1000] min-w-[170px] animate-[ctxIn_0.12s_ease] rounded-[12px]",
-            "border border-[#252a38] bg-[#1a1e28] p-2",
-            "shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
-          )}
-          style={{ left: ctxMenu.x, top: ctxMenu.y }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {ctxMenu.itemType === "file" ? (
-            <>
-              <button
-                className={cn(
-                  "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
-                  "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
-                )}
-                onClick={() => { /* open file */ setCtxMenu(null); }}
-              >
-                Open
-              </button>
-              <button
-                className={cn(
-                  "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
-                  "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
-                )}
-                onClick={() => { /* copy share url */ setCtxMenu(null); }}
-              >
-                Copy link
-              </button>
-              <button
-                className={cn(
-                  "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
-                  "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
-                )}
-                onClick={() => { /* view details */ setCtxMenu(null); }}
-              >
-                View details
-              </button>
-              <button
-                className={cn(
-                  "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
-                  "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
-                )}
-                onClick={() => { /* duplicate */ setCtxMenu(null); }}
-              >
-                Duplicate
-              </button>
-              <button
-                className={cn(
-                  "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
-                  "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
-                )}
-                onClick={() => { setMoveTarget(ctxMenu.item as FileType); setCtxMenu(null); }}
-              >
-                Move to folder
-              </button>
-              <button
-                className={cn(
-                  "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
-                  "text-red-400 transition-all duration-100 hover:bg-red-500/10 hover:text-red-300"
-                )}
-                onClick={() => { setDeleteTarget({ type: "file", item: ctxMenu.item as FileType }); setCtxMenu(null); }}
-              >
-                Delete
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                className={cn(
-                  "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
-                  "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
-                )}
-                onClick={() => { /* open folder */ setCtxMenu(null); }}
-              >
-                Open
-              </button>
-              <button
-                className={cn(
-                  "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
-                  "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
-                )}
-                onClick={() => { /* copy folder link */ setCtxMenu(null); }}
-              >
-                Copy link
-              </button>
-              <button
-                className={cn(
-                  "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
-                  "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
-                )}
-                onClick={() => { setMoveFolderTarget(ctxMenu.item as FolderType); setCtxMenu(null); }}
-              >
-                Move
-              </button>
-              <button
-                className={cn(
-                  "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
-                  "text-[#9ca3af] transition-all duration-100 hover:bg-[#13161e] hover:text-[#e8eaf0]"
-                )}
-                onClick={() => { setNewFolderName(""); setShowNewFolder(true); setCtxMenu(null); }}
-              >
-                New subfolder
-              </button>
-              <button
-                className={cn(
-                  "flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 text-left text-[0.82rem]",
-                  "text-red-400 transition-all duration-100 hover:bg-red-500/10 hover:text-red-300"
-                )}
-                onClick={() => { setDeleteTarget({ type: "folder", item: ctxMenu.item as FolderType }); setCtxMenu(null); }}
-              >
-                Delete
-              </button>
-            </>
-          )}
-        </div>
+      {uploadHook.error && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{uploadHook.error}</div>
       )}
 
-      {toast && (
-        <div
-          className={cn(
-            "fixed bottom-7 right-7 z-50 rounded-xl px-4 py-3 text-sm font-medium",
-            "flex items-center gap-2 max-w-xs",
-            "border",
-            toast.type === "success"
-              ? "border-green-500/30 bg-green-500/10 text-green-400"
-              : toast.type === "warn"
-                ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-400"
-                : "border-red-500/30 bg-red-500/10 text-red-400"
-          )}
-        >
-          <span className="text-xl font-bold">
-            {toast.type === "success" ? "✓" : toast.type === "warn" ? "!" : "✕"}
-          </span>
-          {toast.msg}
-        </div>
+      {uploadHook.duplicateFile && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">Duplicate file detected: {uploadHook.duplicateFile.filename}</div>
       )}
+
+      {/* Dialogs */}
+      <ShareDialog
+        shareTarget={fileActions.shareTarget as any}
+        setShareTarget={fileActions.setShareTarget as any}
+        shareUrl={fileActions.shareUrl}
+        setShareUrl={fileActions.setShareUrl}
+        shareCopied={fileActions.shareCopied}
+        setShareCopied={fileActions.setShareCopied}
+        sharePermission={fileActions.sharePermission}
+        setSharePermission={fileActions.setSharePermission}
+        shareExpiresInDays={fileActions.shareExpiresInDays}
+        setShareExpiresInDays={fileActions.setShareExpiresInDays}
+        onCopyUrl={() => {
+          if (fileActions.shareTarget) {
+            const isFolder = fileActions.shareTarget.type === "folder";
+            fileActions.copyShareUrl(fileActions.shareTarget.item, isFolder);
+          }
+        }}
+        onGenerateFolderShare={() => {
+          if (fileActions.shareTarget?.type === "folder") {
+            fileActions.openFolderShareModal(fileActions.shareTarget.item, fileActions.sharePermission);
+          }
+        }}
+        onGenerateFileShare={() => {
+          if (fileActions.shareTarget?.type === "file") {
+            fileActions.openShareModal(fileActions.shareTarget.item);
+          }
+        }}
+      />
+      <DeleteDialog
+        deleteTarget={fileActions.deleteTarget as any}
+        setDeleteTarget={fileActions.setDeleteTarget as any}
+        onDelete={async () => {
+          if (!fileActions.deleteTarget) return;
+          if (fileActions.deleteTarget.type === "file") {
+            await fileActions.deleteFile(fileActions.deleteTarget.item._id);
+          } else {
+            await fileActions.deleteFolder(fileActions.deleteTarget.item._id);
+          }
+          fileActions.setDeleteTarget(null);
+        }}
+      />
+      <MoveDialog
+        moveTarget={fileActions.moveTarget as any}
+        setMoveTarget={fileActions.setMoveTarget as any}
+        folders={folders}
+        uploadedFiles={files.filter((f) => f.status === "uploaded")}
+        currentFolderId={currentFolderIdState}
+        newFolderName={newFolderName}
+        setNewFolderName={setNewFolderName}
+        onCreateFolder={async () => {
+          if (!newFolderName.trim()) return;
+          await folderActions.createFolder(newFolderName.trim(), currentFolderIdState);
+          setNewFolderName("");
+        }}
+        onMove={async (targetFolderId) => {
+          if (fileActions.moveTarget) {
+            await fileActions.moveFile(fileActions.moveTarget, targetFolderId);
+          }
+          fileActions.setMoveTarget(null);
+        }}
+      />
+      <VersionsDialog
+        versionTarget={fileActions.versionTarget}
+        setVersionTarget={fileActions.setVersionTarget}
+        versions={fileActions.versions}
+        versionsLoading={fileActions.versionsLoading}
+        onOpenVersion={fileActions.openVersionUrl}
+      />
     </div>
   );
 }
