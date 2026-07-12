@@ -1,34 +1,22 @@
-import { getAuthUser } from "@/server/auth/auth";
 import { NextRequest, NextResponse } from "next/server";
-import { getFolders, createFolder } from "@/server/services/folderService";
-import { ServiceError } from "@/server/services/shareService";
+import { getAuthUser } from "@/server/auth/auth";
+import connectDB from "@/adapters/database/mongoose";
+import Folder from "@/adapters/database/models/Folder";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const user = await getAuthUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!user?.userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
 
-    const folders = await getFolders(user.email!);
-    const response = NextResponse.json(folders);
-    response.headers.set("Cache-Control", "private, max-age=30, stale-while-revalidate=60");
-    return response;
+    const { searchParams } = new URL(req.url);
+    const parent_id = searchParams.get("parent_id");
+
+    await connectDB();
+
+    const folders = await Folder.find({ owner_id: user.userId, parent_id: parent_id || null }).lean();
+    return NextResponse.json({ folders });
   } catch (err) {
     console.error("[GET /api/folders]", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const user = await getAuthUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const { name, parent_id } = await req.json();
-    const folder = await createFolder(user.userId!, user.email!, name, parent_id);
-    return NextResponse.json(folder, { status: 201 });
-  } catch (err) {
-    if (err instanceof ServiceError) return NextResponse.json({ error: err.message }, { status: err.status });
-    console.error("[POST /api/folders]", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

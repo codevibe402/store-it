@@ -1,41 +1,23 @@
-import { getAuthUser } from "@/server/auth/auth";
 import { NextRequest, NextResponse } from "next/server";
-import { moveFolder, deleteFolder } from "@/server/services/folderService";
+import { getAuthUser } from "@/server/auth/auth";
 import { ServiceError } from "@/server/services/shareService";
+import connectDB from "@/adapters/database/mongoose";
+import Folder from "@/adapters/database/models/Folder";
 
-type RouteContext = { params: Promise<{ id: string }> };
-
-export async function PATCH(req: NextRequest, { params }: RouteContext) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await getAuthUser();
     if (!user?.userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
 
     const { id } = await params;
-    const body = await req.json().catch(() => null);
-    if (!body || !("parentId" in body)) return NextResponse.json({ error: "parentId is required" }, { status: 400 });
+    await connectDB();
 
-    const updated = await moveFolder(user.userId, id, body.parentId as string | null);
-    return NextResponse.json({ folder: updated });
+    const folder = await Folder.findOne({ _id: id, owner_id: user.userId }).lean();
+    if (!folder) return NextResponse.json({ error: "Folder not found" }, { status: 404 });
+
+    return NextResponse.json({ folder });
   } catch (err) {
-    if (err instanceof ServiceError) return NextResponse.json({ error: err.message }, { status: err.status });
-    console.error("[PATCH /api/folders/:id]", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
-  }
-}
-
-export async function DELETE(req: NextRequest, { params }: RouteContext) {
-  try {
-    const user = await getAuthUser();
-    if (!user?.userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
-
-    const { id } = await params;
-    const deleteFiles = req.nextUrl.searchParams.get("deleteFiles") === "true";
-
-    const result = await deleteFolder(user.userId, id, deleteFiles);
-    return NextResponse.json({ success: true, ...result });
-  } catch (err) {
-    if (err instanceof ServiceError) return NextResponse.json({ error: err.message }, { status: err.status });
-    console.error("[DELETE /api/folders/:id]", err);
+    console.error("[GET /api/folders/:id]", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
