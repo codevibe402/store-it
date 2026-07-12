@@ -7,6 +7,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   try {
     const { token } = await params;
     const versionId = req.nextUrl.searchParams.get("versionId");
+    const download = req.nextUrl.searchParams.get("download") === "1";
 
     const result = await getSharedFileByToken(token, versionId);
 
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       result.size,
       result.mimetype,
       result.filename,
-      "attachment",
+      download ? "attachment" : "inline",
       result.encryptionKeyBase64,
     );
   } catch (err) {
