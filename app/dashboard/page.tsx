@@ -22,6 +22,7 @@ import FileUpload from "@/components/ui/fileupload";
 import { useFiles } from "@/hooks/useFiles";
 import { useFolders } from "@/hooks/useFolders";
 import { ShareDialog, DeleteDialog, VersionsDialog, MoveDialog } from "@/components/dialogs";
+import LogoutButton from "@/components/LogoutButton";
 
 type FileType = {
   _id: string;
@@ -131,11 +132,6 @@ export default function DashboardPage() {
     });
   }, [files, search, sortOrder, typeFilter]);
 
-  const handleLogout = async () => {
-    await fetch("/api/auth/signout");
-    router.push("/sign_in");
-  };
-
   const handleCreateFolder = async () => {
     if (!newFolderName.trim()) return;
     const ok = await folderActions.createFolder(newFolderName.trim(), null);
@@ -170,38 +166,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Profile + Folders tab on right side */}
-          <div className="flex items-center gap-2">
-            {/* Folders dropdown */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setFoldersOpen((o) => !o)}
-                className="flex h-9 items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/70 px-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-800"
-              >
-                <FolderIcon className="h-4 w-4 text-indigo-300" />
-                <span className="text-xs text-slate-300">Folders</span>
-                <span className="ml-1 rounded-full bg-indigo-500/20 px-1.5 text-[10px] font-semibold text-indigo-200">{folders.length}</span>
-                <ChevronDown className="h-3 w-3 text-slate-400" />
-              </button>
-              {foldersOpen && (
-                <div className="absolute right-0 top-12 z-30 w-56 rounded-xl border border-slate-700 bg-[#111827] p-1.5 shadow-2xl shadow-black/30">
-                  {folders.length === 0 ? (
-                    <p className="px-3 py-2 text-xs text-slate-500">No folders yet</p>
-                  ) : (
-                    folders.map((f) => (
-                      <div key={f._id} className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-slate-800 cursor-pointer" onClick={() => { setFoldersOpen(false); router.push(`/folder/${f._id}`); }}>
-                        <div className="flex items-center gap-2">
-                          <FolderIcon className="h-3.5 w-3.5 text-indigo-300" />
-                          <span className="text-sm text-slate-200 truncate max-w-[140px]">{f.name}</span>
-                        </div>
-                        <span className="text-[10px] text-slate-500">{files.filter((fl) => fl.folderId === f._id && fl.status === "uploaded").length} files</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-
+          <div className="flex flex-col items-end gap-1">
             {/* Profile dropdown */}
             <div className="relative">
               <button
@@ -216,7 +181,37 @@ export default function DashboardPage() {
               </button>
               {profileOpen && (
                 <div className="absolute right-0 top-12 z-30 w-44 rounded-xl border border-slate-700 bg-[#111827] p-1.5 shadow-2xl shadow-black/30">
-                  <button type="button" onClick={handleLogout} className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 transition hover:bg-red-500/10 hover:text-red-200">Log out</button>
+                  <LogoutButton className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 transition hover:bg-red-500/10 hover:text-red-200" />
+                </div>
+              )}
+            </div>
+
+            {/* Folders dropdown — BELOW the profile button */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setFoldersOpen((o) => !o)}
+                className="flex h-7 items-center gap-1 rounded-lg border border-slate-700/60 bg-slate-900/50 px-2 text-[11px] font-medium text-slate-400 transition hover:border-slate-600 hover:text-slate-300"
+              >
+                <FolderIcon className="h-3 w-3 text-indigo-300/70" />
+                <span>Folders {folders.length}</span>
+                <ChevronDown className="h-2.5 w-2.5 text-slate-500" />
+              </button>
+              {foldersOpen && (
+                <div className="absolute right-0 top-9 z-30 w-56 rounded-xl border border-slate-700 bg-[#111827] p-1.5 shadow-2xl shadow-black/30">
+                  {folders.length === 0 ? (
+                    <p className="px-3 py-2 text-xs text-slate-500">No folders yet</p>
+                  ) : (
+                    folders.map((f) => (
+                      <div key={f._id} className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-slate-800 cursor-pointer" onClick={() => { setFoldersOpen(false); router.push(`/folder/${f._id}`); }}>
+                        <div className="flex items-center gap-2">
+                          <FolderIcon className="h-3.5 w-3.5 text-indigo-300" />
+                          <span className="text-sm text-slate-200 truncate max-w-[140px]">{f.name}</span>
+                        </div>
+                        <span className="text-[10px] text-slate-500">{files.filter((fl) => fl.folderId === f._id && fl.status === "uploaded").length} files</span>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
             </div>
