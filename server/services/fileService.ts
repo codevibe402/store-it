@@ -71,6 +71,17 @@ export async function deleteFile(userId: string, fileId: string) {
   const file = await File.findOne({ _id: fileId, owner_id: userId }).lean();
   if (!file) throw new ServiceError("File not found", 404);
 
+  await File.findByIdAndUpdate(fileId, { deleted: true, deletedAt: new Date() });
+  return file.filename;
+}
+
+export async function hardDeleteFile(userId: string, fileId: string) {
+  if (!ObjectId.isValid(fileId)) throw new ServiceError("Invalid file id", 400);
+  await connectDB();
+
+  const file = await File.findOne({ _id: fileId, owner_id: userId, deleted: true }).lean();
+  if (!file) throw new ServiceError("File not found in recycle bin", 404);
+
   if (file.backend === "telegram") {
     const chunks = await TelegramChunk.find({ fileId });
     for (const chunk of chunks) {
@@ -85,6 +96,24 @@ export async function deleteFile(userId: string, fileId: string) {
   await FileVersionModel.deleteMany({ file_id: file._id });
   await File.deleteOne({ _id: fileId, owner_id: userId });
   return file.filename;
+}
+
+export async function getRecycleBinFiles(userId: string) {
+  await connectDB();
+  return File.find({ owner_id: userId, deleted: true })
+    .sort({ deletedAt: -1 })
+    .lean();
+}
+
+export async function restoreFile(userId: string, fileId: string) {
+  if (!ObjectId.isValid(fileId)) throw new ServiceError("Invalid file id", 400);
+  await connectDB();
+
+  const file = await File.findOne({ _id: fileId, owner_id: userId, deleted: true }).lean();
+  if (!file) throw new ServiceError("File not found in recycle bin", 404);
+
+  await File.findByIdAndUpdate(fileId, { deleted: false, deletedAt: null });
+  return file;
 }
 
 export async function confirmFile(fileId: string) {

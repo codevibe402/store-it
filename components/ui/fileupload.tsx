@@ -93,9 +93,13 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
           ref={inputRef}
           type="file"
           hidden
+          multiple
           onChange={(e) => {
-            if (e.target.files?.[0]) {
-              uploadHook.handleFile(e.target.files[0], currentFolderIdState);
+            const fileList = e.target.files;
+            if (fileList && fileList.length > 0) {
+              for (let i = 0; i < fileList.length; i++) {
+                uploadHook.handleFile(fileList[i], currentFolderIdState);
+              }
               e.target.value = "";
             }
           }}

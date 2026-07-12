@@ -198,23 +198,36 @@ export function useFiles(files: FileType[], folders: FolderType[]) {
   };
 
   const deleteFile = async (fileId: string) => {
+    // Optimistic: remove instantly from the UI
+    queryClient.setQueryData<{ files: FileType[]; folders: FolderType[]; pendingFiles: FileType[] }>(["dashboard"], (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        files: old.files.filter((f) => f._id !== fileId),
+      };
+    });
     try {
       const res = await fetch(`/api/files/${fileId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed");
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     } catch {
-      // Handle error
+      // Rollback on failure
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     }
   };
 
   const deleteFolder = async (folderId: string) => {
+    queryClient.setQueryData<{ files: FileType[]; folders: FolderType[]; pendingFiles: FileType[] }>(["dashboard"], (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        folders: old.folders.filter((f) => f._id !== folderId),
+      };
+    });
     try {
       const res = await fetch(`/api/folders/${folderId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed");
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     } catch {
-      // Handle error
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     }
   };
 
