@@ -32,6 +32,38 @@ export async function moveFile(userId: string, fileId: string, folderId: string 
   ).lean();
 }
 
+export async function renameFile(userId: string, fileId: string, body: { filename?: string; folderId?: string | null }) {
+  if (!ObjectId.isValid(fileId)) throw new ServiceError("Invalid file id", 400);
+  await connectDB();
+
+  const file = await File.findOne({ _id: fileId, owner_id: userId }).lean();
+  if (!file) throw new ServiceError("File not found", 404);
+
+  const update: Record<string, unknown> = { updatedAt: new Date() };
+  
+  if (body.filename !== undefined) {
+    update.filename = body.filename;
+  }
+  
+  if (body.folderId !== undefined) {
+    if (body.folderId !== null && !ObjectId.isValid(body.folderId)) {
+      throw new ServiceError("Invalid folderId", 400);
+    }
+    if (body.folderId !== null) {
+      const folder = await Folder.findOne({ _id: body.folderId, owner_id: userId }).lean();
+      if (!folder) throw new ServiceError("Target folder not found", 404);
+    }
+    update.folderId = body.folderId;
+    update.folders_id = body.folderId;
+  }
+
+  return File.findOneAndUpdate(
+    { _id: fileId, owner_id: userId },
+    { $set: update },
+    { new: true }
+  ).lean();
+}
+
 export async function deleteFile(userId: string, fileId: string) {
   if (!ObjectId.isValid(fileId)) throw new ServiceError("Invalid file id", 400);
   await connectDB();

@@ -1,6 +1,6 @@
 import { getAuthUser } from "@/server/auth/auth";
 import { NextRequest, NextResponse } from "next/server";
-import { moveFile, deleteFile } from "@/server/services/fileService";
+import { moveFile, deleteFile, renameFile } from "@/server/services/fileService";
 import { ServiceError } from "@/server/services/shareService";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -10,9 +10,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const { id } = await params;
     const body = await req.json().catch(() => null);
-    if (!body || !("folderId" in body)) return NextResponse.json({ error: "folderId is required" }, { status: 400 });
+    if (!body) return NextResponse.json({ error: "Request body required" }, { status: 400 });
 
-    const updated = await moveFile(user.userId, id, body.folderId as string | null);
+    const updated = await renameFile(user.userId, id, body);
     return NextResponse.json({ file: updated });
   } catch (err) {
     if (err instanceof ServiceError) return NextResponse.json({ error: err.message }, { status: err.status });
