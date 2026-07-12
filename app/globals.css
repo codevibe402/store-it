@@ -306,9 +306,14 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    cursor: inherit;
   }
   body {
     @apply bg-background text-foreground;
+    cursor: default;
+  }
+  button, a, [role="button"] {
+    cursor: pointer;
   }
   html {
     @apply font-sans;
