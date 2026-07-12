@@ -48,6 +48,30 @@ export function useFolders(folders: FolderType[], currentFolderId: string | null
     }
   };
 
+  const deleteFolder = async (folderId: string) => {
+    try {
+      const res = await fetch(`/api/folders/${folderId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed");
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    } catch {
+      // Handle error
+    }
+  };
+
+  const renameFolder = async (folder: FolderType, newName: string) => {
+    try {
+      const res = await fetch(`/api/folders/${folder._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newName }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    } catch {
+      // Handle error
+    }
+  };
+
   return {
     newFolderName,
     setNewFolderName,
@@ -58,5 +82,7 @@ export function useFolders(folders: FolderType[], currentFolderId: string | null
     visibleFolders,
     createFolder,
     moveFolder,
+    deleteFolder,
+    renameFolder,
   };
 }

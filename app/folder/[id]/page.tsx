@@ -2,9 +2,10 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { MoreHorizontal, ArrowLeft } from "lucide-react";
+import { useFolders } from "@/hooks/useFolders";
 
 type FolderType = {
   _id: string;
@@ -16,8 +17,11 @@ type FolderType = {
 
 export default function FolderPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { status: sessionStatus } = useSession();
   const [folderId, setFolderId] = useState<string | null>(null);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
   const [ctxMenuTarget, setCtxMenuTarget] = useState<{ folder: FolderType; element: HTMLElement } | null>(null);
   const ctxMenuRef = useRef<HTMLDivElement>(null);
 
@@ -47,9 +51,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
     enabled: !!folderId && sessionStatus === "authenticated",
   });
 
-  const [shareTarget, setShareTarget] = useState<{ type: "folder"; item: FolderType } | null>(null);
-  const [shareUrl, setShareUrl] = useState("");
-  const [deleteConfirm, setDeleteConfirm] = useState<FolderType | null>(null);
+  const folderActions = useFolders(subfolders, folderId);
 
   const openFolderMenu = (folder: FolderType, btn: HTMLElement) => {
     setCtxMenuTarget({ folder, element: btn });
@@ -65,6 +67,14 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [ctxMenuTarget]);
+
+  const handleRenameSubmit = async (folder: FolderType) => {
+    if (renameValue.trim() && renameValue !== folder.name) {
+      await folderActions.renameFolder(folder, renameValue.trim());
+    }
+    setRenameId(null);
+    setCtxMenuTarget(null);
+  };
 
   if (sessionStatus !== "authenticated") return null;
 
@@ -87,8 +97,22 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
             <div className="space-y-3">
               {subfolders.map((f) => (
                 <div key={f._id} className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-                  <span className="text-slate-200">{f.name}</span>
-                  <button onClick={(e) => openFolderMenu(f, e.currentTarget as HTMLElement)} className="rounded p-1 text-slate-400 hover:bg-slate-800">
+                  {renameId === f._id ? (
+                    <input
+                      autoFocus
+                      className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-white outline-none"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleRenameSubmit(f);
+                        if (e.key === "Escape") { setRenameId(null); setCtxMenuTarget(null); }
+                      }}
+                      onBlur={() => { setRenameId(null); setCtxMenuTarget(null); }}
+                    />
+                  ) : (
+                    <span className="text-slate-200">{f.name}</span>
+                  )}
+                  <button onClick={(e) => { if (renameId !== f._id) openFolderMenu(f, e.currentTarget as HTMLElement); }} className="rounded p-1 text-slate-400 hover:bg-slate-800">
                     <MoreHorizontal className="h-4 w-4" />
                   </button>
                 </div>
@@ -105,31 +129,9 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
           style={{ top: ctxMenuTarget.element.getBoundingClientRect().bottom + 4, left: ctxMenuTarget.element.getBoundingClientRect().left }}
         >
           <button onClick={() => { router.push(`/folder/${ctxMenuTarget.folder._id}`); setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800">Open</button>
-          <button onClick={async () => { const res = await fetch(`/api/folders/${ctxMenuTarget.folder._id}/share`, { method: "POST" }); const d = await res.json(); setShareTarget({ type: "folder", item: ctxMenuTarget.folder }); setShareUrl(d.shareUrl); setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800">Share</button>
-          <button onClick={() => { setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800">Rename</button>
-          <button onClick={() => { setDeleteConfirm(ctxMenuTarget.folder); setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10">Delete</button>
-        </div>
-      )}
-
-      {shareTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65">
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-            <p className="mb-2 text-sm text-slate-200">Share link:</p>
-            <input value={shareUrl} readOnly className="w-full rounded bg-slate-800 px-2 py-1 text-xs text-slate-200" />
-            <button onClick={() => { navigator.clipboard.writeText(shareUrl); setShareTarget(null); }} className="mt-3 w-full rounded bg-indigo-500 py-1 text-sm text-white hover:bg-indigo-400">Copy</button>
-          </div>
-        </div>
-      )}
-
-      {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65">
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-            <p className="mb-3 text-sm text-slate-200">Delete folder "{deleteConfirm.name}"?</p>
-            <div className="flex gap-2">
-              <button onClick={() => setDeleteConfirm(null)} className="flex-1 rounded bg-slate-800 py-1 text-sm text-slate-200">Cancel</button>
-              <button onClick={async () => { await fetch(`/api/folders/${deleteConfirm._id}`, { method: "DELETE" }); setDeleteConfirm(null); router.push("/dashboard"); }} className="flex-1 rounded bg-red-500 py-1 text-sm text-white">Delete</button>
-            </div>
-          </div>
+          <button onClick={() => { setRenameId(ctxMenuTarget.folder._id); setRenameValue(ctxMenuTarget.folder.name); setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800">Rename</button>
+          <button onClick={() => { setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800">Move</button>
+          <button onClick={() => { if (confirm(`Delete folder "${ctxMenuTarget.folder.name}"?`)) { folderActions.deleteFolder(ctxMenuTarget.folder._id); router.push("/dashboard"); } setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10">Delete</button>
         </div>
       )}
     </main>
