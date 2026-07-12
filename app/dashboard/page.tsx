@@ -23,6 +23,7 @@ import { useFiles } from "@/hooks/useFiles";
 import { useFolders } from "@/hooks/useFolders";
 import { ShareDialog, DeleteDialog, VersionsDialog, MoveDialog } from "@/components/dialogs";
 import LogoutButton from "@/components/LogoutButton";
+import RecycleBinSidebar from "@/components/RecycleBinSidebar";
 
 type FileType = {
   _id: string;
@@ -154,12 +155,14 @@ export default function DashboardPage() {
   };
 
   return (
-    <main
-      className="min-h-screen bg-[linear-gradient(180deg,#0b1220_0%,#111827_100%)] py-5 text-slate-100 sm:py-8"
-      style={{ paddingInline: "clamp(24px, 5vw, 96px)" }}
-    >
-      <div className="w-full max-w-5xl" style={{ marginInline: "auto" }}>
-        <header className="flex items-center justify-between border-b border-slate-700/70 pb-6">
+    <div className="flex min-h-screen bg-[linear-gradient(180deg,#0b1220_0%,#111827_100%)] text-slate-100">
+      <RecycleBinSidebar />
+      <main
+        className="flex-1 py-5 text-slate-100 sm:py-8"
+        style={{ paddingLeft: "clamp(24px, 5vw, 96px)", paddingRight: "clamp(24px, 5vw, 96px)" }}
+      >
+        <div className="w-full max-w-5xl mx-auto">
+          <header className="flex items-center justify-between border-b border-slate-700/70 pb-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500 text-lg font-bold text-white shadow-lg shadow-indigo-950/30">S</div>
             <h1 className="text-xl font-semibold tracking-tight text-white">StoreIt</h1>
@@ -443,5 +446,6 @@ export default function DashboardPage() {
         onOpenVersion={fileActions.openVersionUrl}
       />
     </main>
+    </div>
   );
 }
