@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useMemo, useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -159,7 +159,6 @@ export default function DashboardPage() {
       <RecycleBinSidebar />
       <main
         className="flex-1 py-5 text-slate-100 sm:py-8"
-        style={{ paddingLeft: "clamp(24px, 5vw, 96px)", paddingRight: "clamp(24px, 5vw, 96px)" }}
       >
         <div className="w-full max-w-5xl mx-auto">
           <header className="flex items-center justify-between border-b border-slate-700/70 pb-6">
@@ -189,7 +188,7 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Folders dropdown — BELOW the profile button */}
+            {/* Folders dropdown â€” BELOW the profile button */}
             <div className="relative">
               <button
                 type="button"
@@ -221,12 +220,12 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        <section className="mx-auto max-w-4xl py-8">
+        <section className="mx-auto max-w-3xl py-8">
           <h2 className="text-3xl font-bold tracking-tight text-white">Storage</h2>
           <p className="mt-2 text-base text-slate-400">Upload, organize, and share your files from one place.</p>
         </section>
 
-        <section className="mx-auto flex max-w-4xl flex-wrap items-end justify-between gap-3 border-y border-slate-700/70 py-5">
+        <section className="mx-auto flex max-w-3xl flex-wrap items-end justify-between gap-3 border-y border-slate-700/70 py-5">
           <div className="flex flex-wrap items-end gap-3 flex-1 lg:grid lg:grid-cols-[minmax(320px,1fr)_160px_160px]">
             <label className="flex h-11 items-center gap-3 rounded-xl border border-slate-700 bg-slate-900/70 px-3 text-slate-400 transition focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-400/20">
               <Search className="h-5 w-5" />
@@ -283,11 +282,11 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <section className="mx-auto max-w-4xl py-8">
+        <section className="mx-auto max-w-3xl py-8">
           <FileUpload currentFolderId={null} />
         </section>
 
-        <section className="mx-auto max-w-4xl pb-8">
+        <section className="mx-auto max-w-3xl pb-8">
           <div className="mb-5 flex items-end justify-between">
             <div>
               <p className="text-sm font-medium text-indigo-300">Recently uploaded</p>
@@ -310,7 +309,7 @@ export default function DashboardPage() {
                   <FileTypeIcon mimetype={file.mimetype} />
                   <div className="min-w-0 flex-1">
                     <h3 className="truncate text-base font-semibold text-slate-100">{file.filename}</h3>
-                    <p className="mt-1 text-sm text-slate-400">{formatBytes(file.size)} <span className="px-1.5 text-slate-600">•</span> {formatDate(file.createdAt)}</p>
+                    <p className="mt-1 text-sm text-slate-400">{formatBytes(file.size)} <span className="px-1.5 text-slate-600">â€¢</span> {formatDate(file.createdAt)}</p>
                   </div>
                   <div className="flex items-center gap-2 sm:ml-auto">
                     <button type="button" onClick={() => fileActions.openFile(file)} className="rounded-lg bg-indigo-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-400">Open</button>
@@ -332,7 +331,7 @@ export default function DashboardPage() {
         </section>
       </div>
 
-      {/* 3-dot context menu — rendered at top level, stable positioning */}
+      {/* 3-dot context menu â€” rendered at top level, stable positioning */}
       {ctxMenuTarget && (() => {
         const file = visibleFiles.find((f) => f._id === ctxMenuTarget.fileId);
         if (!file) return null;

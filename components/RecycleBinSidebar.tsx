@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/components/AuthProvider";
 
 type RecycleFile = {
@@ -11,16 +12,21 @@ type RecycleFile = {
 
 export default function RecycleBinSidebar() {
   const { user } = useAuth();
-  const [isOpen, setIsOpen] = useState(false);
-  const [recycleFiles, setRecycleFiles] = useState<RecycleFile[]>([]);
+
+  const { data: recycleFiles = [], refetch } = useQuery<RecycleFile[]>({
+    queryKey: ["recycle", user?.userId],
+    queryFn: async () => {
+      const res = await fetch(`/api/recycle/${user?.userId}`);
+      if (!res.ok) return [];
+      const d = await res.json();
+      return d.files || [];
+    },
+    enabled: !!user?.userId,
+  });
 
   useEffect(() => {
-    if (!user?.userId) return;
-    fetch(`/api/recycle/${user.userId}`)
-      .then((r) => r.json())
-      .then((d) => setRecycleFiles(d.files || []))
-      .catch(() => {});
-  }, [user?.userId, isOpen]);
+    refetch();
+  }, [user?.userId]);
 
   const handleRestore = async (fileId: string) => {
     if (!user?.userId) return;
@@ -29,7 +35,7 @@ export default function RecycleBinSidebar() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fileId }),
     });
-    setRecycleFiles(recycleFiles.filter((f) => f._id !== fileId));
+    refetch();
   };
 
   const handleDelete = async (fileId: string) => {
@@ -39,46 +45,33 @@ export default function RecycleBinSidebar() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fileId }),
     });
-    setRecycleFiles(recycleFiles.filter((f) => f._id !== fileId));
+    refetch();
   };
 
   if (!user) return null;
 
   return (
-    <>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="fixed top-4 left-4 z-50 flex items-center gap-2 rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-200 hover:bg-slate-700"
-        aria-label="Toggle recycle bin"
-      >
-        <span>🗑</span>
-        Recycle Bin ({recycleFiles.length})
-      </button>
-
-      {isOpen && (
-        <div className="fixed inset-y-0 left-0 z-40 w-72 overflow-y-auto border-r border-slate-700 bg-slate-900 p-4 pt-16">
-          <h3 className="mb-4 text-sm font-medium text-slate-400">Recycle Bin</h3>
-          {recycleFiles.length === 0 ? (
-            <p className="text-xs text-slate-500">Empty</p>
-          ) : (
-            <ul className="space-y-2">
-              {recycleFiles.map((f) => (
-                <li key={f._id} className="flex items-center justify-between rounded bg-slate-800 p-2 text-xs">
-                  <span className="truncate text-slate-200">{f.filename}</span>
-                  <div className="flex gap-1">
-                    <button onClick={() => handleRestore(f._id)} className="text-green-400 hover:text-green-300">
-                      ↺
-                    </button>
-                    <button onClick={() => handleDelete(f._id)} className="text-red-400 hover:text-red-300">
-                      ✕
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+    <aside className="w-64 flex-shrink-0 border-r border-slate-700 bg-slate-900 p-4 pt-6">
+      <h3 className="mb-4 text-sm font-medium text-slate-400">Recycle Bin ({recycleFiles.length})</h3>
+      {recycleFiles.length === 0 ? (
+        <p className="text-xs text-slate-500">Empty</p>
+      ) : (
+        <ul className="space-y-2">
+          {recycleFiles.map((f) => (
+            <li key={f._id} className="flex items-center justify-between rounded bg-slate-800 p-2 text-xs">
+              <span className="truncate text-slate-200">{f.filename}</span>
+              <div className="flex gap-1">
+                <button onClick={() => handleRestore(f._id)} className="text-green-400 hover:text-green-300" title="Restore">
+                  ↺
+                </button>
+                <button onClick={() => handleDelete(f._id)} className="text-red-400 hover:text-red-300" title="Delete permanently">
+                  ✕
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
-    </>
+    </aside>
   );
 }
