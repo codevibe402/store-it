@@ -157,129 +157,127 @@ export default function DashboardPage() {
       <RecycleBinSidebar />
       <div className="flex flex-1">
         <main className="flex-1 py-5 text-slate-100 sm:py-8">
-          <div className="mx-auto max-w-2xl">
-            <header className="flex items-center justify-between border-b border-slate-700/70 pb-6">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500 text-lg font-bold text-white shadow-lg shadow-indigo-950/30">S</div>
-                <h1 className="text-xl font-semibold tracking-tight text-white">StoreIt</h1>
-              </div>
-            </header>
+          <header className="flex items-center justify-between border-b border-slate-700/70 pb-6">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500 text-lg font-bold text-white shadow-lg shadow-indigo-950/30">S</div>
+              <h1 className="text-xl font-semibold tracking-tight text-white">StoreIt</h1>
+            </div>
+          </header>
 
-            <section className="py-8">
-              <h2 className="text-3xl font-bold tracking-tight text-white">Storage</h2>
-              <p className="mt-2 text-base text-slate-400">Upload, organize, and share your files from one place.</p>
-            </section>
+          <section className="py-8">
+            <h2 className="text-3xl font-bold tracking-tight text-white">Storage</h2>
+            <p className="mt-2 text-base text-slate-400">Upload, organize, and share your files from one place.</p>
+          </section>
 
-            <section className="flex flex-wrap items-end justify-between gap-3 border-y border-slate-700/70 py-5">
-              <div className="flex flex-wrap items-end gap-3 flex-1 lg:grid lg:grid-cols-[minmax(320px,1fr)_160px_160px]">
-                <label className="flex h-11 items-center gap-3 rounded-xl border border-slate-700 bg-slate-900/70 px-3 text-slate-400 transition focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-400/20">
-                  <Search className="h-5 w-5" />
-                  <input value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500" placeholder="Search files..." />
-                </label>
-                <label className="relative">
-                  <span className="sr-only">Filter files</span>
-                  <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="h-11 w-full appearance-none rounded-xl border border-slate-700 bg-slate-900/70 px-3 pr-9 text-sm text-slate-200 outline-none transition hover:border-slate-600 focus:border-indigo-400">
-                    <option value="all">All files</option>
-                    <option value="images">Images</option>
-                    <option value="videos">Videos</option>
-                    <option value="documents">Documents</option>
-                    <option value="archives">Archives</option>
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-slate-400" />
-                </label>
-                <label className="relative">
-                  <span className="sr-only">Sort files</span>
-                  <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="h-11 w-full appearance-none rounded-xl border border-slate-700 bg-slate-900/70 px-3 pr-9 text-sm text-slate-200 outline-none transition hover:border-slate-600 focus:border-indigo-400">
-                    <option value="recent">Recently uploaded</option>
-                    <option value="name">Name</option>
-                    <option value="size">Size</option>
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-slate-400" />
-                </label>
-              </div>
-              <button
-                type="button"
-                onClick={() => { setShowNewFolder(true); setNewFolderName(""); }}
-                className="flex h-11 items-center gap-2 rounded-xl border border-indigo-500/50 bg-indigo-500/15 px-4 text-sm font-medium text-indigo-300 transition hover:border-indigo-400 hover:bg-indigo-500/20 hover:text-indigo-200 shrink-0"
-              >
-                <FolderPlus className="h-4 w-4" />
-                New Folder
-              </button>
-            </section>
+          <section className="flex flex-wrap items-end justify-between gap-3 border-y border-slate-700/70 py-5">
+            <div className="flex flex-wrap items-end gap-3 flex-1 lg:grid lg:grid-cols-[minmax(320px,1fr)_160px_160px]">
+              <label className="flex h-11 items-center gap-3 rounded-xl border border-slate-700 bg-slate-900/70 px-3 text-slate-400 transition focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-400/20">
+                <Search className="h-5 w-5" />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500" placeholder="Search files..." />
+              </label>
+              <label className="relative">
+                <span className="sr-only">Filter files</span>
+                <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="h-11 w-full appearance-none rounded-xl border border-slate-700 bg-slate-900/70 px-3 pr-9 text-sm text-slate-200 outline-none transition hover:border-slate-600 focus:border-indigo-400">
+                  <option value="all">All files</option>
+                  <option value="images">Images</option>
+                  <option value="videos">Videos</option>
+                  <option value="documents">Documents</option>
+                  <option value="archives">Archives</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-slate-400" />
+              </label>
+              <label className="relative">
+                <span className="sr-only">Sort files</span>
+                <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="h-11 w-full appearance-none rounded-xl border border-slate-700 bg-slate-900/70 px-3 pr-9 text-sm text-slate-200 outline-none transition hover:border-slate-600 focus:border-indigo-400">
+                  <option value="recent">Recently uploaded</option>
+                  <option value="name">Name</option>
+                  <option value="size">Size</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-slate-400" />
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setShowNewFolder(true); setNewFolderName(""); }}
+              className="flex h-11 items-center gap-2 rounded-xl border border-indigo-500/50 bg-indigo-500/15 px-4 text-sm font-medium text-indigo-300 transition hover:border-indigo-400 hover:bg-indigo-500/20 hover:text-indigo-200 shrink-0"
+            >
+              <FolderPlus className="h-4 w-4" />
+              New Folder
+            </button>
+          </section>
 
-            {showNewFolder && (
-              <div className="fixed inset-0 bg-black/65 flex items-center justify-center z-50" onClick={() => setShowNewFolder(false)}>
-                <div className="bg-[#1a1e28] border border-[#252a38] rounded-xl p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-                  <h3 className="text-[1.05rem] font-semibold text-[#e8eaf0] mb-4">Create a new folder</h3>
-                  <input
-                    autoFocus
-                    className="w-full bg-[#13161e] border border-[#252a38] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-[#6c8eff]/50 mb-4"
-                    placeholder="Folder name"
-                    value={newFolderName}
-                    onChange={(e) => setNewFolderName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") handleCreateFolder(); }}
-                  />
-                  <div className="flex gap-2">
-                    <button onClick={handleCreateFolder} className="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-500 text-white hover:bg-indigo-400 transition">Create</button>
-                    <button onClick={() => setShowNewFolder(false)} className="flex-1 px-4 py-2 text-sm font-medium rounded-lg border border-gray-600 text-gray-400 hover:bg-gray-800 hover:text-white transition">Cancel</button>
-                  </div>
+          {showNewFolder && (
+            <div className="fixed inset-0 bg-black/65 flex items-center justify-center z-50" onClick={() => setShowNewFolder(false)}>
+              <div className="bg-[#1a1e28] border border-[#252a38] rounded-xl p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+                <h3 className="text-[1.05rem] font-semibold text-[#e8eaf0] mb-4">Create a new folder</h3>
+                <input
+                  autoFocus
+                  className="w-full bg-[#13161e] border border-[#252a38] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-[#6c8eff]/50 mb-4"
+                  placeholder="Folder name"
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleCreateFolder(); }}
+                />
+                <div className="flex gap-2">
+                  <button onClick={handleCreateFolder} className="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-500 text-white hover:bg-indigo-400 transition">Create</button>
+                  <button onClick={() => setShowNewFolder(false)} className="flex-1 px-4 py-2 text-sm font-medium rounded-lg border border-gray-600 text-gray-400 hover:bg-gray-800 hover:text-white transition">Cancel</button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          <section className="py-8">
+            <FileUpload currentFolderId={null} />
+          </section>
+
+          <section className="pb-8">
+            <div className="mb-5 flex items-end justify-between">
+              <div>
+                <p className="text-sm font-medium text-indigo-300">Recently uploaded</p>
+                <h2 className="mt-1 text-xl font-semibold text-white">Files ({visibleFiles.length})</h2>
+              </div>
+              <button type="button" onClick={() => router.push("/all-files")} className="text-sm font-medium text-indigo-300 transition hover:text-indigo-200">View all</button>
+            </div>
+
+            {isLoading ? (
+              <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-6 text-sm text-slate-400">Loading files...</div>
+            ) : visibleFiles.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-600 bg-slate-900/40 py-16 text-center">
+                <FolderIcon className="mx-auto h-10 w-10 text-slate-500" />
+                <p className="mt-3 text-sm text-slate-400">No files match your current filters.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {visibleFiles.map((file) => (
+                  <article key={file._id} className="group relative flex min-h-[76px] flex-col gap-4 rounded-xl border border-slate-700 bg-[#111827] p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-400/60 hover:shadow-lg hover:shadow-indigo-950/20 sm:flex-row sm:items-center">
+                    <FileTypeIcon mimetype={file.mimetype} />
+                    <div className="min-w-0 flex-1">
+                      <h3 className="truncate text-base font-semibold text-slate-100">{file.filename}</h3>
+                      <p className="mt-1 text-sm text-slate-400">{formatBytes(file.size)} <span className="px-1.5 text-slate-600">â€¢</span> {formatDate(file.createdAt)}</p>
+                    </div>
+                    <div className="flex items-center gap-2 sm:ml-auto">
+                      <button type="button" onClick={() => fileActions.openFile(file)} className="rounded-lg bg-indigo-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-400">Open</button>
+                      <button type="button" aria-label={`Download ${file.filename}`} onClick={() => fileActions.downloadFile(file)} className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"><Download className="h-4 w-4" /></button>
+                      <button type="button" aria-label={`Share ${file.filename}`} onClick={() => fileActions.openShareModal(file)} className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"><Share2 className="h-4 w-4" /></button>
+                      <button
+                        type="button"
+                        aria-label={`More actions for ${file.filename}`}
+                        onClick={(e) => { e.stopPropagation(); e.preventDefault(); openMenu(file, e.currentTarget as HTMLElement); }}
+                        className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"
+                      >
+                        <MoreHorizontal className="h-5 w-5" />
+                      </button>
+                    </div>
+                  </article>
+                ))}
               </div>
             )}
-
-            <section className="py-8">
-              <FileUpload currentFolderId={null} />
-            </section>
-
-            <section className="pb-8">
-              <div className="mb-5 flex items-end justify-between">
-                <div>
-                  <p className="text-sm font-medium text-indigo-300">Recently uploaded</p>
-                  <h2 className="mt-1 text-xl font-semibold text-white">Files ({visibleFiles.length})</h2>
-                </div>
-                <button type="button" onClick={() => router.push("/all-files")} className="text-sm font-medium text-indigo-300 transition hover:text-indigo-200">View all</button>
-              </div>
-
-              {isLoading ? (
-                <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-6 text-sm text-slate-400">Loading files...</div>
-              ) : visibleFiles.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-600 bg-slate-900/40 py-16 text-center">
-                  <FolderIcon className="mx-auto h-10 w-10 text-slate-500" />
-                  <p className="mt-3 text-sm text-slate-400">No files match your current filters.</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {visibleFiles.map((file) => (
-                    <article key={file._id} className="group relative flex min-h-[76px] flex-col gap-4 rounded-xl border border-slate-700 bg-[#111827] p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-400/60 hover:shadow-lg hover:shadow-indigo-950/20 sm:flex-row sm:items-center">
-                      <FileTypeIcon mimetype={file.mimetype} />
-                      <div className="min-w-0 flex-1">
-                        <h3 className="truncate text-base font-semibold text-slate-100">{file.filename}</h3>
-                        <p className="mt-1 text-sm text-slate-400">{formatBytes(file.size)} <span className="px-1.5 text-slate-600">â€¢</span> {formatDate(file.createdAt)}</p>
-                      </div>
-                      <div className="flex items-center gap-2 sm:ml-auto">
-                        <button type="button" onClick={() => fileActions.openFile(file)} className="rounded-lg bg-indigo-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-400">Open</button>
-                        <button type="button" aria-label={`Download ${file.filename}`} onClick={() => fileActions.downloadFile(file)} className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"><Download className="h-4 w-4" /></button>
-                        <button type="button" aria-label={`Share ${file.filename}`} onClick={() => fileActions.openShareModal(file)} className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"><Share2 className="h-4 w-4" /></button>
-                        <button
-                          type="button"
-                          aria-label={`More actions for ${file.filename}`}
-                          onClick={(e) => { e.stopPropagation(); e.preventDefault(); openMenu(file, e.currentTarget as HTMLElement); }}
-                          className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"
-                        >
-                          <MoreHorizontal className="h-5 w-5" />
-                        </button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </section>
-          </div>
+          </section>
         </main>
       </div>
       <RightSidebar folders={folders} />
 
-      {/* 3-dot context menu â€” rendered at top level, stable positioning */}
+      {/* 3-dot context menu — rendered at top level, stable positioning */}
       {ctxMenuTarget && (() => {
         const file = visibleFiles.find((f) => f._id === ctxMenuTarget.fileId);
         if (!file) return null;
