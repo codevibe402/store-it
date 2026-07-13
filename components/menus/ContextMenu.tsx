@@ -64,7 +64,7 @@ export default function ContextMenu({
     const file = item as FileType;
     return (
       <div
-        className="fixed z-[1000] min-w-[160px] animate-[ctxIn_0.12s_ease] rounded-[12px] border border-[#252a38] bg-[#1a1e28] p-2 shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
+        className="fixed z-[1000] min-w-[160px] ctx-in rounded-[12px] border border-[#252a38] bg-[#1a1e28] p-2 shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
         style={{ left: menuPos.left, top: menuPos.top }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -124,7 +124,7 @@ export default function ContextMenu({
   const folder = item as FolderType;
   return (
     <div
-      className="fixed z-[1000] min-w-[160px] animate-[ctxIn_0.12s_ease] rounded-[12px] border border-[#252a38] bg-[#1a1e28] p-2 shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
+      className="fixed z-[1000] min-w-[160px] ctx-in rounded-[12px] border border-[#252a38] bg-[#1a1e28] p-2 shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
       style={{ left: menuPos.left, top: menuPos.top }}
       onClick={(e) => e.stopPropagation()}
     >

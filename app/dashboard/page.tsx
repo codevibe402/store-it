@@ -157,7 +157,7 @@ export default function DashboardPage() {
       <RecycleBinSidebar />
       <div className="flex flex-1">
         <main className="flex-1 py-5 pl-64 text-slate-100 sm:py-8">
-          <div className="pl-8">
+          <div className="mx-auto w-[90%]">
           <header className="flex items-center justify-between border-b border-slate-700/70 pb-6">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500 text-lg font-bold text-white shadow-lg shadow-indigo-950/30">S</div>

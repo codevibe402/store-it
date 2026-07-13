@@ -1,5 +1,5 @@
-@import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap');
+@import "tailwindcss";
 @import "tw-animate-css";
 
 .sidebar-wrapper {
@@ -326,8 +326,5 @@
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes ctxIn { from { opacity: 0; transform: scale(0.95) translateY(-10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
-  
-  .animate-[fadeIn_0.15s_ease] { animation: fadeIn 0.15s ease; }
-  .animate-[slideUp_0.2s_ease] { animation: slideUp 0.2s ease; }
-  .animate-[ctxIn_0.12s_ease] { animation: ctxIn 0.12s ease; }
+
 }

@@ -26,8 +26,6 @@ import {
   FieldError 
 } from "./ui/field"
 
-import {InputGroup} from "./ui/input-group"
-
 import { Input } from "./ui/input"
 import { sanitizeEmail, sanitizeUsername, sanitizePassword } from "@/shared/security"
 
@@ -165,7 +163,7 @@ async function onSubmit(data: FormValues) {
 
       <CardContent>
         <form id="form-rhf-demo" onSubmit={form.handleSubmit(onSubmit)}>
-          <InputGroup>
+          <div className="flex flex-col gap-4">
             {/* Email */}
             <Controller
               name="email"
@@ -230,7 +228,7 @@ async function onSubmit(data: FormValues) {
                 </Field>
               )}
             />
-          </InputGroup>
+          </div>
         </form>
       </CardContent>
 
