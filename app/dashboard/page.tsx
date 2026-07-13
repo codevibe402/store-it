@@ -156,14 +156,13 @@ export default function DashboardPage() {
     <div className="flex min-h-screen bg-[linear-gradient(180deg,#0b1220_0%,#111827_100%)] text-slate-100">
       <RecycleBinSidebar />
       <div className="flex flex-1">
-        <main className="flex-1 py-5 text-slate-100 sm:py-8">
-          <div className="mx-auto max-w-2xl pr-48">
-            <header className="flex items-center justify-between border-b border-slate-700/70 pb-6">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500 text-lg font-bold text-white shadow-lg shadow-indigo-950/30">S</div>
-                <h1 className="text-xl font-semibold tracking-tight text-white">StoreIt</h1>
-              </div>
-            </header>
+        <main className="flex-1 py-5 pl-64 text-slate-100 sm:py-8">
+          <header className="flex items-center justify-between border-b border-slate-700/70 pb-6">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500 text-lg font-bold text-white shadow-lg shadow-indigo-950/30">S</div>
+              <h1 className="text-xl font-semibold tracking-tight text-white">StoreIt</h1>
+            </div>
+          </header>
 
           <section className="py-8">
             <h2 className="text-3xl font-bold tracking-tight text-white">Storage</h2>
@@ -254,7 +253,7 @@ export default function DashboardPage() {
                     <FileTypeIcon mimetype={file.mimetype} />
                     <div className="min-w-0 flex-1">
                       <h3 className="truncate text-base font-semibold text-slate-100">{file.filename}</h3>
-                      <p className="mt-1 text-sm text-slate-400">{formatBytes(file.size)} <span className="px-1.5 text-slate-600">•</span> {formatDate(file.createdAt)}</p>
+                      <p className="mt-1 text-sm text-slate-400">{formatBytes(file.size)} <span className="px-1.5 text-slate-600">â€¢</span> {formatDate(file.createdAt)}</p>
                     </div>
                     <div className="flex items-center gap-2 sm:ml-auto">
                       <button type="button" onClick={() => fileActions.openFile(file)} className="rounded-lg bg-indigo-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-400">Open</button>
@@ -274,7 +273,6 @@ export default function DashboardPage() {
               </div>
             )}
           </section>
-        </div>
         </main>
       </div>
       <RightSidebar folders={folders} />
