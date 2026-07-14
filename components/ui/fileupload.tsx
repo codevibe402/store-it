@@ -147,7 +147,13 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
           </div>
 
           {uploadHook.uploads.map((u) => (
-            <UploadRow key={u.id} entry={u} onCancel={() => uploadHook.cancelSingleUpload(u.id)} />
+            <UploadRow
+              key={u.id}
+              entry={u}
+              onPause={() => uploadHook.pauseSingleUpload(u.id)}
+              onResume={() => uploadHook.resumeSingleUpload(u.id)}
+              onCancel={() => uploadHook.cancelSingleUpload(u.id)}
+            />
           ))}
         </div>
       )}
@@ -192,7 +198,7 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
   );
 }
 
-function UploadRow({ entry, onCancel }: { entry: UploadEntry; onCancel: () => void }) {
+function UploadRow({ entry, onPause, onResume, onCancel }: { entry: UploadEntry; onPause: () => void; onResume: () => void; onCancel: () => void }) {
   const inProgress = entry.status === "uploading" || entry.status === "paused";
 
   return (
@@ -242,8 +248,22 @@ function UploadRow({ entry, onCancel }: { entry: UploadEntry; onCancel: () => vo
         </div>
 
         {/* Actions */}
-        {inProgress && (
+        {entry.status === "uploading" && (
           <div className="flex shrink-0 items-center gap-2">
+            <button onClick={onPause} className="rounded-lg px-3 py-2 text-sm font-medium text-amber-300 transition hover:bg-amber-500/10">
+              Pause
+            </button>
+            <button onClick={onCancel} className="rounded-lg px-3 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10">
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {entry.status === "paused" && (
+          <div className="flex shrink-0 items-center gap-2">
+            <button onClick={onResume} className="rounded-lg px-3 py-2 text-sm font-medium text-indigo-300 transition hover:bg-indigo-500/10">
+              Resume
+            </button>
             <button onClick={onCancel} className="rounded-lg px-3 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10">
               Cancel
             </button>
