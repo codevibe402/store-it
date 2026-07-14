@@ -19,6 +19,7 @@ export default function RightSidebar({ folders }: RightSidebarProps) {
   const router = useRouter();
   const [profileOpen, setProfileOpen] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [isOpen, setIsOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -74,44 +75,57 @@ export default function RightSidebar({ folders }: RightSidebarProps) {
   };
 
   return (
-    <aside className="w-56 flex-shrink-0 border-l border-slate-700 bg-slate-900/70 p-3">
-      <div className="flex flex-col gap-3">
-        <div className="relative" ref={profileRef}>
-          <button
-            type="button"
-            onClick={() => setProfileOpen((open) => !open)}
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/50 px-2 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-800"
-            aria-expanded={profileOpen}
-            aria-label="Open profile menu"
-          >
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500/20 text-[10px] font-semibold text-indigo-200">U</span>
-            <ChevronDown className="h-3 w-3 text-slate-400" />
-          </button>
-          {profileOpen && (
-            <div className="absolute right-0 top-10 z-30 w-40 rounded-lg border border-slate-700 bg-[#111827] p-1 shadow-xl">
-              <LogoutButton className="w-full rounded px-2 py-1 text-left text-xs text-red-300 transition hover:bg-red-500/10" />
-            </div>
-          )}
-        </div>
+    <>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="fixed right-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700"
+        aria-label="Toggle folders"
+        title="Folders"
+      >
+        <FolderIcon className="h-5 w-5" />
+      </button>
 
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-medium uppercase tracking-wider text-slate-400">Folders</span>
-            <button onClick={() => router.push("/dashboard?new=1")} className="rounded p-0.5 text-slate-400 hover:text-indigo-300" title="Add folder to root">
-              <FolderPlus className="h-3.5 w-3.5" />
-            </button>
+      {isOpen && (
+        <aside className="fixed inset-y-0 right-0 z-40 w-56 border-l border-slate-700 bg-slate-900/70 p-3 shadow-2xl">
+          <div className="flex flex-col gap-3">
+            <div className="relative" ref={profileRef}>
+              <button
+                type="button"
+                onClick={() => setProfileOpen((open) => !open)}
+                className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/50 px-2 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-800"
+                aria-expanded={profileOpen}
+                aria-label="Open profile menu"
+              >
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500/20 text-[10px] font-semibold text-indigo-200">U</span>
+                <ChevronDown className="h-3 w-3 text-slate-400" />
+              </button>
+              {profileOpen && (
+                <div className="absolute right-0 top-10 z-30 w-40 rounded-lg border border-slate-700 bg-[#111827] p-1 shadow-xl">
+                  <LogoutButton className="w-full rounded px-2 py-1 text-left text-xs text-red-300 transition hover:bg-red-500/10" />
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-medium uppercase tracking-wider text-slate-400">Folders</span>
+                <button onClick={() => router.push("/dashboard?new=1")} className="rounded p-0.5 text-slate-400 hover:text-indigo-300" title="Add folder to root">
+                  <FolderPlus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                {rootFolders.length === 0 ? (
+                  <p className="px-2 py-1 text-[10px] text-slate-500">No folders</p>
+                ) : (
+                  rootFolders.map((f) => (
+                    <FolderItem key={f._id} folder={f} />
+                  ))
+                )}
+              </div>
+            </div>
           </div>
-          <div className="max-h-80 overflow-y-auto">
-            {rootFolders.length === 0 ? (
-              <p className="px-2 py-1 text-[10px] text-slate-500">No folders</p>
-            ) : (
-              rootFolders.map((f) => (
-                <FolderItem key={f._id} folder={f} />
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-    </aside>
+        </aside>
+      )}
+    </>
   );
 }
