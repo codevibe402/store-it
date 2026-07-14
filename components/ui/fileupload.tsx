@@ -5,8 +5,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { CloudUpload, FileText, LoaderCircle, CheckCircle, XCircle, AlertCircle } from "lucide-react";
+import { CloudUpload, FileText, LoaderCircle, CheckCircle, XCircle, AlertCircle, RotateCcw } from "lucide-react";
 import { useUpload, UploadEntry } from "@/hooks/useUpload";
+import { useResume } from "@/hooks/useResume";
 
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 
@@ -51,6 +52,7 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
   }, [currentFolderId]);
 
   const uploadHook = useUpload(currentFolderIdState);
+  const resumeHook = useResume();
 
   const { data: dashboard } = useQuery<{ pendingFiles: FileType[] }>({
     queryKey: ["dashboard"],
@@ -158,11 +160,69 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
         </div>
       )}
 
-      {/* Pending files from dashboard */}
-      {visiblePendingFiles.length > 0 && uploadHook.uploads.length === 0 && (
+      {/* Resume entries (in-progress resume operations) */}
+      {resumeHook.resumeEntries.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-base font-semibold text-slate-100">Resuming ({resumeHook.resumeEntries.length})</h3>
+          {resumeHook.resumeEntries.map((re) => {
+            const pf = visiblePendingFiles.find((f) => f._id === re.fileId);
+            return (
+              <div key={re.fileId} className="rounded-xl border border-slate-700 bg-[#111827] p-4">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-300">
+                    <RotateCcw className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-base font-semibold text-slate-100">{re.filename}</div>
+                    <div className="mt-1 text-sm text-slate-400">
+                      {formatBytes(re.size)}
+                      {re.status === "resuming" && <span> <span className="text-slate-500">•</span> {re.progress}%</span>}
+                      {re.status === "paused" && <span className="ml-2 text-amber-300">Paused</span>}
+                      {re.status === "success" && <span className="ml-2 text-green-400">Uploaded</span>}
+                    </div>
+                    {(re.status === "resuming" || re.status === "paused") && (
+                      <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                        <div className="h-full rounded-full bg-indigo-400 transition-all duration-300" style={{ width: `${Math.max(0, re.progress)}%` }} />
+                      </div>
+                    )}
+                    {re.status === "error" && re.error && (
+                      <div className="mt-2 text-sm text-red-400">{re.error}</div>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {re.status === "resuming" && pf && (
+                      <button onClick={() => resumeHook.pauseSingleResume(pf)} className="rounded-lg px-3 py-2 text-sm font-medium text-amber-300 transition hover:bg-amber-500/10">
+                        Pause
+                      </button>
+                    )}
+                    {re.status === "paused" && pf && (
+                      <button onClick={() => resumeHook.startResume(pf)} className="rounded-lg px-3 py-2 text-sm font-medium text-indigo-300 transition hover:bg-indigo-500/10">
+                        Resume
+                      </button>
+                    )}
+                    {pf && (
+                      <button onClick={() => resumeHook.cancelResume(pf)} className="rounded-lg px-3 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10">
+                        Cancel
+                      </button>
+                    )}
+                    {(re.status === "success" || re.status === "error") && (
+                      <button onClick={() => uploadHook.cancelledIds.current.add(re.fileId)} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-400 transition hover:bg-slate-800">
+                        Dismiss
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Pending files from dashboard — inline resume buttons */}
+      {visiblePendingFiles.length > 0 && (
         <div className="space-y-3">
           <h3 className="text-base font-semibold text-slate-100">Pending uploads</h3>
-          {visiblePendingFiles.map((file) => (
+          {visiblePendingFiles.filter((f) => !resumeHook.resumeEntries.find((re) => re.fileId === f._id)).map((file) => (
             <div key={file._id} className="rounded-xl border border-slate-700 bg-[#111827] p-4">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-300">
@@ -173,7 +233,13 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
                   <div className="mt-1 text-sm text-slate-400">{formatBytes(file.size)} <span className="px-1.5 text-slate-600">•</span> Status: <span className="text-amber-300">{file.status}</span></div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <a href="/resume" className="rounded-lg px-3 py-2 text-sm font-medium text-indigo-300 transition hover:bg-indigo-500/10">Resume</a>
+                  <button
+                    type="button"
+                    onClick={() => resumeHook.startResume(file)}
+                    className="rounded-lg px-3 py-2 text-sm font-medium text-indigo-300 transition hover:bg-indigo-500/10"
+                  >
+                    Resume
+                  </button>
                   <button
                     type="button"
                     className="rounded-lg px-3 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10"
