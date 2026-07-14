@@ -33,6 +33,7 @@ const CHUNK_SIZE = 10 * 1024 * 1024;
 
 export function useFiles(files: FileType[], folders: FolderType[]) {
   const queryClient = useQueryClient();
+  const { data: session } = useSession();
   const [moveTarget, setMoveTarget] = useState<FileType | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ type: "file"; item: FileType } | { type: "folder"; item: FolderType } | null>(null);
   const [versionTarget, setVersionTarget] = useState<FileType | null>(null);
@@ -209,6 +210,9 @@ export function useFiles(files: FileType[], folders: FolderType[]) {
     try {
       const res = await fetch(`/api/files/${fileId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed");
+      if (session?.user?.id) {
+        queryClient.invalidateQueries({ queryKey: ["recycle", session.user.id] });
+      }
     } catch {
       // Rollback on failure
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });

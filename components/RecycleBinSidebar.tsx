@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/components/AuthProvider";
 
 type RecycleFile = {
@@ -13,6 +13,7 @@ type RecycleFile = {
 
 export default function RecycleBinSidebar() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [isOpen, setIsOpen] = useState(false);
 
   const { data: recycleFiles = [] } = useQuery<RecycleFile[]>({
@@ -28,20 +29,29 @@ export default function RecycleBinSidebar() {
 
   const handleRestore = async (fileId: string) => {
     if (!user?.userId) return;
-    await fetch(`/api/recycle/${user.userId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileId }),
-    });
+    try {
+      const res = await fetch(`/api/recycle/${user.userId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId }),
+      });
+      if (!res.ok) throw new Error("Restore failed");
+      queryClient.invalidateQueries({ queryKey: ["recycle", user.userId] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    } catch {}
   };
 
   const handleDelete = async (fileId: string) => {
     if (!user?.userId) return;
-    await fetch(`/api/recycle/${user.userId}`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileId }),
-    });
+    try {
+      const res = await fetch(`/api/recycle/${user.userId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId }),
+      });
+      if (!res.ok) throw new Error("Delete failed");
+      queryClient.invalidateQueries({ queryKey: ["recycle", user.userId] });
+    } catch {}
   };
 
   if (!user) return null;
