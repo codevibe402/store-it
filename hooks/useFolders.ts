@@ -27,6 +27,14 @@ export function useFolders(folders: FolderType[], currentFolderId: string | null
         body: JSON.stringify({ name, parent_id: parentId }),
       });
       if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
+      const newFolder = data.folder as FolderType;
+
+      queryClient.setQueryData<{ files: any[]; folders: FolderType[] }>(["dashboard"], (old) => {
+        if (!old) return old;
+        return { ...old, folders: [...old.folders, newFolder] };
+      });
+
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       return true;
     } catch {
