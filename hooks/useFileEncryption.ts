@@ -31,7 +31,7 @@ export async function deriveKey(
   const enc = new TextEncoder()
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
-    enc.encode(passphrase),
+    enc.encode(passphrase).buffer as ArrayBuffer,
     "PBKDF2",
     false,
     ["deriveBits", "deriveKey"],
@@ -39,7 +39,7 @@ export async function deriveKey(
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt,
+      salt: salt.buffer as ArrayBuffer,
       iterations: PBKDF2_ITERATIONS,
       hash: "SHA-256",
     },
@@ -57,9 +57,9 @@ export async function encryptChunk(
 ): Promise<{ ciphertext: Uint8Array; nonce: Uint8Array }> {
   const iv = nonce || crypto.getRandomValues(new Uint8Array(NONCE_SIZE))
   const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, tagLength: AUTH_TAG_SIZE * 8 },
+    { name: "AES-GCM", iv: iv as unknown as BufferSource, tagLength: AUTH_TAG_SIZE * 8 },
     key,
-    plaintext,
+    plaintext as unknown as BufferSource,
   )
   return { ciphertext: new Uint8Array(encrypted), nonce: iv }
 }
@@ -70,9 +70,9 @@ export async function decryptChunk(
   nonce: Uint8Array,
 ): Promise<Uint8Array> {
   const decrypted = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: nonce, tagLength: AUTH_TAG_SIZE * 8 },
+    { name: "AES-GCM", iv: nonce as unknown as BufferSource, tagLength: AUTH_TAG_SIZE * 8 },
     key,
-    ciphertext,
+    ciphertext as unknown as BufferSource,
   )
   return new Uint8Array(decrypted)
 }

@@ -118,6 +118,6 @@ export async function createTelegramDownloadStreaming(options: DownloadOptions):
     size: version.size,
     mimetype: version.mimetype,
     filename: file.filename,
-    encryptionKeyBase64: null,
+    encryptionKeyBase64: undefined,
   };
 }

@@ -194,14 +194,14 @@ export function useUpload(currentFolderId: string | null) {
 
         if (cryptoKey) {
           const { ciphertext, nonce: iv } = await encryptChunk(chunkBuf, cryptoKey);
-          chunkHash = await crypto.subtle.digest("SHA-256", ciphertext).then(h => {
+          chunkHash = await crypto.subtle.digest("SHA-256", ciphertext as unknown as BufferSource).then(h => {
             const arr = new Uint8Array(h);
             return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
           });
           nonce = bufferToBase64(iv);
-          dataToUpload = new Blob([ciphertext], { type: "application/octet-stream" });
+          dataToUpload = new Blob([ciphertext as unknown as BlobPart], { type: "application/octet-stream" });
         } else {
-          chunkHash = await crypto.subtle.digest("SHA-256", chunkBuf).then(h => {
+          chunkHash = await crypto.subtle.digest("SHA-256", chunkBuf as unknown as BufferSource).then(h => {
             const arr = new Uint8Array(h);
             return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
           });
