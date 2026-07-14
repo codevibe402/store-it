@@ -20,3 +20,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+
+export async function POST(req: NextRequest) {
+  try {
+    const user = await getAuthUser();
+    if (!user?.userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+
+    const body = await req.json().catch(() => null);
+    if (!body || !body.name?.trim()) return NextResponse.json({ error: "Folder name is required" }, { status: 400 });
+
+    await connectDB();
+
+    const folder = await Folder.create({
+      name: body.name.trim(),
+      owner_id: user.userId,
+      owner_email: user.email,
+      parent_id: body.parent_id || null,
+    });
+
+    return NextResponse.json({ folder }, { status: 201 });
+  } catch (err) {
+    console.error("[POST /api/folders]", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}

@@ -9,13 +9,19 @@ import {
   FolderPlus,
   MoreHorizontal,
   Search,
+  ChevronDown,
+  File,
+  Image,
+  Video,
+  FileText,
+  Archive,
 } from "lucide-react";
 import FileUpload from "@/components/ui/fileupload";
 import { useFiles } from "@/hooks/useFiles";
 import { useFolders } from "@/hooks/useFolders";
 import { ShareDialog, DeleteDialog, VersionsDialog, MoveDialog } from "@/components/dialogs";
 import RecycleBinSidebar from "@/components/RecycleBinSidebar";
-import { ChevronDown } from "lucide-react";
+import RightSidebar from "@/components/RightSidebar";
 
 type FileType = {
   _id: string;
@@ -42,18 +48,42 @@ type FolderType = {
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function getFileIcon(mime: string) {
+  if (mime.startsWith("image/")) return <Image className="h-5 w-5" />;
+  if (mime.startsWith("video/")) return <Video className="h-5 w-5" />;
+  if (mime.includes("pdf") || mime.includes("document") || mime.includes("text")) return <FileText className="h-5 w-5" />;
+  if (mime.includes("zip") || mime.includes("rar") || mime.includes("tar") || mime.includes("7z") || mime.includes("compress")) return <Archive className="h-5 w-5" />;
+  return <File className="h-5 w-5" />;
+}
+
+function getFileIconBg(mime: string): string {
+  if (mime.startsWith("image/")) return "bg-pink-500/15 text-pink-300";
+  if (mime.startsWith("video/")) return "bg-purple-500/15 text-purple-300";
+  if (mime.includes("pdf") || mime.includes("document") || mime.includes("text")) return "bg-blue-500/15 text-blue-300";
+  if (mime.includes("zip") || mime.includes("rar") || mime.includes("tar") || mime.includes("7z") || mime.includes("compress")) return "bg-amber-500/15 text-amber-300";
+  return "bg-slate-500/15 text-slate-300";
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { status: sessionStatus } = useSession();
   const isAuthenticated = sessionStatus === "authenticated";
   const [search, setSearch] = useState("");
   const [sortOrder, setSortOrder] = useState("recent");
+  const [filter, setFilter] = useState("all");
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
-  // Simple 3-dot menu: track which file's menu is open + ref for detecting outside clicks
   const [ctxMenuTarget, setCtxMenuTarget] = useState<{ fileId: string; element: HTMLElement } | null>(null);
   const ctxMenuRef = useRef<HTMLDivElement>(null);
 
@@ -85,18 +115,24 @@ export default function DashboardPage() {
   const fileActions = useFiles(files, folders);
   const folderActions = useFolders(folders, null);
 
-  const visibleFolders = useMemo(() => {
+  const visibleFiles = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
-    const filtered = folders.filter((folder) => {
-      if ((folder.parent_id ?? null) !== null) return false;
-      if (normalizedSearch && !folder.name.toLowerCase().includes(normalizedSearch)) return false;
-      return true;
+    let filtered = files.filter((f) => {
+      if (normalizedSearch && !f.filename.toLowerCase().includes(normalizedSearch)) return false;
+      switch (filter) {
+        case "images": return f.mimetype.startsWith("image/");
+        case "videos": return f.mimetype.startsWith("video/");
+        case "documents": return f.mimetype.includes("pdf") || f.mimetype.includes("document") || f.mimetype.includes("sheet") || f.mimetype === "text/plain" || f.mimetype.includes("presentation");
+        case "archives": return f.mimetype.includes("zip") || f.mimetype.includes("rar") || f.mimetype.includes("7z") || f.mimetype.includes("tar") || f.mimetype.includes("gzip") || f.mimetype.includes("compress");
+        default: return true;
+      }
     });
-    return filtered.sort((a, b) => {
-      if (sortOrder === "name") return a.name.localeCompare(b.name);
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-  }, [folders, search, sortOrder]);
+    switch (sortOrder) {
+      case "name": return filtered.sort((a, b) => a.filename.localeCompare(b.filename));
+      case "size": return filtered.sort((a, b) => (b.size || 0) - (a.size || 0));
+      default: return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
+  }, [files, search, filter, sortOrder]);
 
   const handleCreateFolder = async () => {
     if (!newFolderName.trim()) return;
@@ -140,13 +176,25 @@ export default function DashboardPage() {
             <div className="flex flex-wrap items-end gap-3 flex-1 lg:grid lg:grid-cols-[minmax(320px,1fr)_160px_160px]">
               <label className="flex h-11 items-center gap-3 rounded-xl border border-slate-700 bg-slate-900/70 px-3 text-slate-400 transition focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-400/20">
                 <Search className="h-5 w-5" />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500" placeholder="Search folders..." />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500" placeholder="Search files..." />
               </label>
               <label className="relative">
-                <span className="sr-only">Sort folders</span>
+                <span className="sr-only">Filter files</span>
+                <select value={filter} onChange={(e) => setFilter(e.target.value)} className="h-11 w-full appearance-none rounded-xl border border-slate-700 bg-slate-900/70 px-3 pr-9 text-sm text-slate-200 outline-none transition hover:border-slate-600 focus:border-indigo-400">
+                  <option value="all">All files</option>
+                  <option value="images">Images</option>
+                  <option value="videos">Videos</option>
+                  <option value="documents">Documents</option>
+                  <option value="archives">Archives</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-slate-400" />
+              </label>
+              <label className="relative">
+                <span className="sr-only">Sort files</span>
                 <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="h-11 w-full appearance-none rounded-xl border border-slate-700 bg-slate-900/70 px-3 pr-9 text-sm text-slate-200 outline-none transition hover:border-slate-600 focus:border-indigo-400">
-                  <option value="recent">Recently created</option>
+                  <option value="recent">Recently uploaded</option>
                   <option value="name">Name</option>
+                  <option value="size">Size</option>
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-slate-400" />
               </label>
@@ -188,35 +236,44 @@ export default function DashboardPage() {
           <section className="pb-8">
             <div className="mb-5 flex items-end justify-between">
               <div>
-                <p className="text-sm font-medium text-indigo-300">Root folders</p>
-                <h2 className="mt-1 text-xl font-semibold text-white">Folders ({visibleFolders.length})</h2>
+                <p className="text-sm font-medium text-indigo-300">Recently uploaded</p>
+                <h2 className="mt-1 text-xl font-semibold text-white">Files ({visibleFiles.length})</h2>
               </div>
+              <button onClick={() => router.push("/all-files")} type="button" className="text-sm font-medium text-indigo-300 transition hover:text-indigo-200">View all</button>
             </div>
 
             {isLoading ? (
-              <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-6 text-sm text-slate-400">Loading folders...</div>
-            ) : visibleFolders.length === 0 ? (
+              <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-6 text-sm text-slate-400">Loading files...</div>
+            ) : visibleFiles.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-600 bg-slate-900/40 py-16 text-center">
                 <FolderIcon className="mx-auto h-10 w-10 text-slate-500" />
-                <p className="mt-3 text-sm text-slate-400">No folders yet. Click "New Folder" to create one.</p>
+                <p className="mt-3 text-sm text-slate-400">No files match your current filters.</p>
               </div>
             ) : (
               <div className="space-y-3">
-                {visibleFolders.map((folder) => (
-                  <article key={folder._id} className="group relative flex min-h-[76px] flex-col gap-4 rounded-xl border border-slate-700 bg-[#111827] p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-400/60 hover:shadow-lg hover:shadow-indigo-950/20 sm:flex-row sm:items-center">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-300"><FolderIcon className="h-5 w-5" /></div>
+                {visibleFiles.map((file) => (
+                  <article key={file._id} className="group relative flex min-h-[68px] flex-col gap-3 rounded-xl border border-slate-700 bg-[#111827] p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-400/60 hover:shadow-lg hover:shadow-indigo-950/20 sm:flex-row sm:items-center">
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${getFileIconBg(file.mimetype)}`}>
+                      {getFileIcon(file.mimetype)}
+                    </div>
                     <div className="min-w-0 flex-1">
-                      <h3 className="truncate text-base font-semibold text-slate-100">{folder.name}</h3>
-                      <p className="mt-1 text-sm text-slate-400">{formatDate(folder.createdAt)}</p>
+                      <h3 className="truncate text-sm font-semibold text-slate-100">{file.filename}</h3>
+                      <p className="mt-0.5 text-xs text-slate-400">{formatBytes(file.size)} &middot; {formatDate(file.createdAt)}</p>
                     </div>
                     <div className="flex items-center gap-2 sm:ml-auto">
                       <button
                         type="button"
-                        aria-label={`More actions for ${folder.name}`}
-                        onClick={(e) => { e.stopPropagation(); e.preventDefault(); openMenu(folder, e.currentTarget as HTMLElement); }}
-                        className="rounded-lg p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"
+                        onClick={() => fileActions.openFile(file)}
+                        className="rounded-lg px-3 py-1.5 text-xs font-medium text-indigo-300 transition hover:bg-indigo-500/10"
                       >
-                        <MoreHorizontal className="h-5 w-5" />
+                        Preview
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => fileActions.downloadFile(file)}
+                        className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:bg-slate-800"
+                      >
+                        Download
                       </button>
                     </div>
                   </article>
@@ -226,10 +283,11 @@ export default function DashboardPage() {
           </section>
         </div>
       </main>
+      <RightSidebar folders={folders} />
 
-      {/* 3-dot context menu — rendered at top level, stable positioning */}
+      {/* 3-dot context menu */}
       {ctxMenuTarget && (() => {
-        const folder = visibleFolders.find((f) => f._id === ctxMenuTarget.fileId);
+        const folder = folders.find((f) => f._id === ctxMenuTarget.fileId);
         if (!folder) return null;
         const rect = ctxMenuTarget.element.getBoundingClientRect();
         return (
