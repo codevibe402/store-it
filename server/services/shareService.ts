@@ -58,7 +58,7 @@ export async function createFileShare(userId: string, fileId: string) {
 
   if (isTelegram) {
     const token = generateToken();
-    const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const base = process.env.NEXT_PUBLIC_APP_URL ;
     const shareUrl = `${base}/api/share/file/${token}`;
     await FileShare.create({ fileId, filename: file.filename, owner_id: userId, shareUrl, shareToken: token, backend: "telegram", expiresAt });
     return { shareUrl, expiresAt, reused: false as const };

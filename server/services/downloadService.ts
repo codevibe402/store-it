@@ -1,4 +1,4 @@
-import { createDecryptionStream, decryptChunk } from "@/server/services/decryptionService";
+import { decryptChunk } from "@/server/services/decryptionService";
 import { downloadTelegramChunk } from "@/server/services/storageService";
 import { parseNonce } from "@/server/lib/crypto";
 import TelegramChunk from "@/adapters/database/models/TelegramChunk";
@@ -54,19 +54,14 @@ export async function createTelegramDownloadStreaming(options: DownloadOptions):
     .lean();
 
   const totalChunks = chunks.length;
-  const fetchQueue = new Map<number, Promise<{ data: Buffer; nonce: Buffer }>>();
+  const fetchQueue = new Map<number, Promise<Buffer>>();
 
   function startFetch(index: number) {
     if (index >= totalChunks || fetchQueue.has(index)) return;
-
     const chunk = chunks[index];
     fetchQueue.set(
       index,
-      (async () => {
-        const data = await downloadTelegramChunk(chunk.telegramFileId);
-        const nonce = parseNonce(chunk.nonce);
-        return { data, nonce };
-      })()
+      downloadTelegramChunk(chunk.telegramFileId),
     );
   }
 
@@ -87,20 +82,27 @@ export async function createTelegramDownloadStreaming(options: DownloadOptions):
       startFetch(idx + PREFETCH);
 
       try {
-        const { data, nonce } = await fetchQueue.get(idx)!;
+        const data = await fetchQueue.get(idx)!;
         fetchQueue.delete(idx);
 
-        if (decryptionKey === null) {
+        // Backward compat: decrypt with server-side key if present (old files)
+        if (decryptionKey === null && file.encryptionKey) {
           const keyDoc = await EncryptionKeyModel.findOne({ fileId: file._id }).lean();
           if (keyDoc) {
             decryptionKey = Buffer.from(keyDoc.keyBase64, "base64");
           }
         }
 
-        if (decryptionKey && nonce && nonce.length > 0) {
-          const decrypted = decryptChunk(Buffer.from(data), nonce, decryptionKey);
-          controller.enqueue(new Uint8Array(decrypted));
+        if (decryptionKey) {
+          const nonce = parseNonce(chunks[idx].nonce);
+          if (nonce.length > 0) {
+            const decrypted = decryptChunk(Buffer.from(data), nonce, decryptionKey);
+            controller.enqueue(new Uint8Array(decrypted));
+          } else {
+            controller.enqueue(new Uint8Array(data));
+          }
         } else {
+          // New zero-knowledge mode: stream encrypted data as-is
           controller.enqueue(new Uint8Array(data));
         }
 
@@ -116,13 +118,6 @@ export async function createTelegramDownloadStreaming(options: DownloadOptions):
     size: version.size,
     mimetype: version.mimetype,
     filename: file.filename,
-    encryptionKeyBase64: file.encryptionKey,
+    encryptionKeyBase64: null,
   };
-}
-
-export function computeHash(data: Uint8Array | Buffer): string {
-  const { createHash } = require("crypto");
-  const hash = createHash("sha256");
-  hash.update(Buffer.from(data));
-  return hash.digest("hex");
 }

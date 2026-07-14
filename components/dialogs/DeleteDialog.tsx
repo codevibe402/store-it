@@ -24,8 +24,8 @@ export default function DeleteDialog({ deleteTarget, setDeleteTarget, onDelete }
   if (!deleteTarget) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/65 flex items-center justify-center z-50 animate-[fadeIn_0.15s_ease]" onClick={() => setDeleteTarget(null)}>
-      <div className="bg-[#1a1e28] border border-[#252a38] rounded-xl p-6 w-full max-w-sm animate-[slideUp_0.2s_ease]" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/65 flex items-center justify-center z-50 fade-in" onClick={() => setDeleteTarget(null)}>
+      <div className="bg-[#1a1e28] border border-[#252a38] rounded-xl p-6 w-full max-w-sm slide-up" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-[1.05rem] font-semibold text-[#e8eaf0] mb-2">Confirm delete</h3>
         <p className="text-[0.82rem] text-[#6b7280] mb-6">
           {deleteTarget.type === "file"

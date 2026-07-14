@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/server/auth/auth";
 import connectDB from "@/adapters/database/mongoose";
 import File from "@/adapters/database/models/File";
-import User from "@/adapters/database/models/User";
 import EncryptionKey from "@/adapters/database/models/EncryptionKey";
+import User from "@/adapters/database/models/User";
 import { generateEncryptionKey } from "@/server/lib/crypto";
 
 const CHUNK_SIZE = 4 * 1024 * 1024;
@@ -15,13 +15,14 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { filename, mimeType, size, hash, folderId = null, fileId, useEncryption } = body as {
+  const { filename, mimeType, size, hash, folderId = null, fileId, encryptionSalt, useEncryption } = body as {
     filename: string;
     mimeType: string;
     size: number;
     hash: string;
     folderId: string | null;
     fileId?: string;
+    encryptionSalt?: string;
     useEncryption?: boolean;
   };
 
@@ -82,30 +83,69 @@ export async function POST(req: NextRequest) {
     }
 
     const totalChunks = Math.ceil(size / CHUNK_SIZE);
-    const { base64: keyBase64 } = useEncryption ? generateEncryptionKey() : { base64: null as any };
 
-    file = await File.create({
-      filename,
-      hash,
-      size,
-      mimetype: mimeType || "application/octet-stream",
-      owner_id: user._id,
-      owner_email: user.email,
-      storageUrl: `telegram/${user._id}/${Date.now()}-${filename}`,
-      folderId: folderId ?? null,
-      folders_id: folderId ?? null,
-      backend: "telegram",
-      totalChunks,
-      chunkSize: CHUNK_SIZE,
-      status: "pending",
-      encryptionKey: keyBase64,
-    });
+    // Mode 1: Zero-knowledge — client provided salt, no server key
+    if (encryptionSalt) {
+      file = await File.create({
+        filename,
+        hash,
+        size,
+        mimetype: mimeType || "application/octet-stream",
+        owner_id: user._id,
+        owner_email: user.email,
+        storageUrl: `telegram/${user._id}/${Date.now()}-${filename}`,
+        folderId: folderId ?? null,
+        folders_id: folderId ?? null,
+        backend: "telegram",
+        totalChunks,
+        chunkSize: CHUNK_SIZE,
+        status: "pending",
+        encryptionIv: encryptionSalt,
+      });
+    } else if (useEncryption) {
+      // Mode 2: Server-side encryption (backward compat)
+      const { base64: keyBase64 } = generateEncryptionKey();
 
-    if (keyBase64) {
-      await EncryptionKey.create({
-        fileId: file._id,
-        keyBase64,
-        algorithm: "aes-256-gcm",
+      file = await File.create({
+        filename,
+        hash,
+        size,
+        mimetype: mimeType || "application/octet-stream",
+        owner_id: user._id,
+        owner_email: user.email,
+        storageUrl: `telegram/${user._id}/${Date.now()}-${filename}`,
+        folderId: folderId ?? null,
+        folders_id: folderId ?? null,
+        backend: "telegram",
+        totalChunks,
+        chunkSize: CHUNK_SIZE,
+        status: "pending",
+        encryptionKey: keyBase64,
+      });
+
+      if (keyBase64) {
+        await EncryptionKey.create({
+          fileId: file._id,
+          keyBase64,
+          algorithm: "aes-256-gcm",
+        });
+      }
+    } else {
+      // Mode 3: No encryption
+      file = await File.create({
+        filename,
+        hash,
+        size,
+        mimetype: mimeType || "application/octet-stream",
+        owner_id: user._id,
+        owner_email: user.email,
+        storageUrl: `telegram/${user._id}/${Date.now()}-${filename}`,
+        folderId: folderId ?? null,
+        folders_id: folderId ?? null,
+        backend: "telegram",
+        totalChunks,
+        chunkSize: CHUNK_SIZE,
+        status: "pending",
       });
     }
   }
@@ -116,7 +156,5 @@ export async function POST(req: NextRequest) {
     fileId: file._id.toString(),
     totalChunks,
     chunkSize: file.chunkSize || CHUNK_SIZE,
-    encrypt: useEncryption ?? false,
-    encryptionKey: file.encryptionKey,
   });
 }

@@ -5,7 +5,6 @@ import File from "@/adapters/database/models/File";
 import TelegramChunk from "@/adapters/database/models/TelegramChunk";
 import { sendDocument, deleteMessage } from "@/adapters/storage/telegram";
 import { encryptChunkWithNonce } from "@/server/services/encryptionService";
-import { generateNonce as generateNonceFromService } from "@/server/services/encryptionService";
 import { computeHash } from "@/server/lib/hash";
 import crypto from "crypto";
 
@@ -17,10 +16,6 @@ async function sleep(ms: number) {
 }
 
 export async function POST(req: NextRequest) {
-  const _token = process.env.TELEGRAM_BOT_TOKEN;
-  const _channel = process.env.TELEGRAM_CHANNEL_ID;
-  const _apiUrl = process.env.TELEGRAM_BOT_API_URL;
-  
   const user = await getAuthUser();
   if (!user?.email) {
     return NextResponse.json({ error: "Unauthorized - please login", status: 401 });
@@ -30,22 +25,11 @@ export async function POST(req: NextRequest) {
   const fileId = form.get("fileId") as string;
   const chunkIndexStr = form.get("chunkIndex") as string;
   const hash = form.get("hash") as string;
-  const plaintextHash = form.get("plaintextHash") as string;
   const nonce = form.get("nonce") as string;
   const chunkFile = form.get("chunk") as Blob | null;
-  const useEncryption = form.get("useEncryption") === "true";
 
-  if (!fileId) {
-    return NextResponse.json({ error: "fileId is required", status: 400 });
-  }
-  if (!chunkIndexStr) {
-    return NextResponse.json({ error: "chunkIndex is required", status: 400 });
-  }
-  if (!hash) {
-    return NextResponse.json({ error: "hash is required", status: 400 });
-  }
-  if (!chunkFile) {
-    return NextResponse.json({ error: "chunk file is required", status: 400 });
+  if (!fileId || !chunkIndexStr || !hash || !chunkFile) {
+    return NextResponse.json({ error: "fileId, chunkIndex, hash, and chunk are required", status: 400 });
   }
 
   const chunkIndex = parseInt(chunkIndexStr, 10);
@@ -56,22 +40,11 @@ export async function POST(req: NextRequest) {
   await connectDB();
 
   const file = await File.findById(fileId);
-  if (!file) {
-    return NextResponse.json({ error: "File not found", status: 404 });
-  }
-  if (file.owner_email !== user.email) {
-    return NextResponse.json({ error: "Forbidden - not your file", status: 403 });
-  }
-
-  if (file.backend !== "telegram") {
-    return NextResponse.json({ error: "File is not using Telegram backend", status: 409 });
-  }
-
+  if (!file) return NextResponse.json({ error: "File not found", status: 404 });
+  if (file.owner_email !== user.email) return NextResponse.json({ error: "Forbidden", status: 403 });
+  if (file.backend !== "telegram") return NextResponse.json({ error: "File is not using Telegram backend", status: 409 });
   if (!["pending", "uploading", "paused"].includes(file.status)) {
-    return NextResponse.json({ 
-      error: `File is in "${file.status}" state and cannot accept chunks`, 
-      status: 409 
-    });
+    return NextResponse.json({ error: `File is in "${file.status}" state`, status: 409 });
   }
 
   if (file.status === "pending" || file.status === "paused") {
@@ -81,124 +54,68 @@ export async function POST(req: NextRequest) {
 
   const existingChunk = await TelegramChunk.findOne({ fileId, chunkIndex });
   if (existingChunk) {
-    return NextResponse.json({ 
-      message: "Chunk already uploaded",
-      chunkIndex,
-      telegramFileId: existingChunk.telegramFileId,
-    });
+    return NextResponse.json({ message: "Chunk already uploaded", chunkIndex, telegramFileId: existingChunk.telegramFileId });
   }
 
   const chunkBuffer = Buffer.from(await chunkFile.arrayBuffer());
-  
-  let encryptedChunk: Buffer;
+
+  // Backward compat: if file has server-side encryptionKey, encrypt on server (old method)
+  let dataToStore: Buffer;
   let chunkNonce: string;
-  let chunkPlaintextHash: string;
+  let storedHash: string;
 
-  // Always generate a nonce to satisfy the schema requirement
-  const nonceValue = nonce || crypto.randomBytes(12).toString("base64");
-
-  if (useEncryption && file.encryptionKey) {
+  if (file.encryptionKey) {
     const key = Buffer.from(file.encryptionKey, "base64");
-    if (key.length !== 32) {
-      return NextResponse.json({ error: `Invalid key length: ${key.length}`, status: 500 });
-    }
     const nonceToUse = nonce ? Buffer.from(nonce, "base64") : crypto.randomBytes(12);
     chunkNonce = nonceToUse.toString("base64");
-    
-    try {
-      const encrypted = encryptChunkWithNonce(chunkBuffer, nonceToUse, key);
-      encryptedChunk = encrypted;
-    } catch (encErr) {
-      return NextResponse.json({ error: `Encryption failed: ${encErr instanceof Error ? encErr.message : String(encErr)}`, status: 500 });
-    }
-    chunkPlaintextHash = plaintextHash || computeHash(chunkBuffer);
+    dataToStore = encryptChunkWithNonce(chunkBuffer, nonceToUse, key);
+    storedHash = computeHash(dataToStore);
   } else {
-    encryptedChunk = chunkBuffer;
-    chunkNonce = nonceValue;
-    chunkPlaintextHash = plaintextHash || hash;
+    // New zero-knowledge mode: client already encrypted, store as-is
+    dataToStore = chunkBuffer;
+    chunkNonce = nonce || crypto.randomBytes(12).toString("base64");
+    storedHash = hash;
   }
 
-  const encryptedHash = computeHash(encryptedChunk);
-  const filename = `${file.filename}.part${chunkIndex}`;
-
+  const filename = `chunk_${chunkIndex}.bin`;
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const blob = new Blob([new Uint8Array(encryptedChunk)], { type: "application/octet-stream" });
+      const blob = new Blob([new Uint8Array(dataToStore)], { type: "application/octet-stream" });
       const { messageId, fileId: tgFileId } = await sendDocument(blob, filename);
 
       try {
-        const finalNonce = chunkNonce || crypto.randomBytes(12).toString("base64");
-        if (!finalNonce) {
-          throw new Error("Failed to generate nonce for chunk");
-        }
         await TelegramChunk.create({
           fileId,
           chunkIndex,
-          hash: encryptedHash,
-          plaintextHash: chunkPlaintextHash,
-          nonce: finalNonce,
-          size: encryptedChunk.length,
+          hash: storedHash,
+          plaintextHash: hash,
+          nonce: chunkNonce,
+          size: dataToStore.length,
           telegramMessageId: messageId,
           telegramFileId: tgFileId,
         });
       } catch (dbErr: any) {
         if (dbErr?.code === 11000) {
           await deleteMessage(messageId);
-          return NextResponse.json({ 
-            message: "Chunk already recorded",
-            chunkIndex,
-            telegramFileId: dbErr?.telegramFileId || tgFileId,
-          });
+          return NextResponse.json({ message: "Chunk already recorded", chunkIndex, telegramFileId: dbErr?.telegramFileId || tgFileId });
         }
         await deleteMessage(messageId);
         throw dbErr;
       }
 
-      return NextResponse.json({ 
-        messageId, 
-        fileId: tgFileId,
-        chunkIndex,
-        hash: encryptedHash,
-        plaintextHash: chunkPlaintextHash,
-        nonce: chunkNonce,
-        size: encryptedChunk.length,
-      });
+      return NextResponse.json({ messageId, fileId: tgFileId, chunkIndex, hash: storedHash, nonce: chunkNonce, size: dataToStore.length });
     } catch (err: any) {
       lastError = err;
-      
-      if (err?.code === 429) {
-        if (attempt < RETRY_DELAYS.length - 1) {
-          await sleep(RETRY_DELAYS[attempt]);
-          continue;
-        }
+      if (err?.code === 429 && attempt < RETRY_DELAYS.length - 1) {
+        await sleep(RETRY_DELAYS[attempt]);
+        continue;
       }
-      
-      const errorMessage = err?.message || String(err) || "Unknown error";
-      console.error(`[telegram/chunk] Chunk ${chunkIndex} failed:`, errorMessage);
-      
-      return NextResponse.json({
-        error: `Upload failed: ${errorMessage}`,
-        chunkIndex,
-        canFallbackToS3: true,
-        attempt: attempt + 1,
-        maxAttempts: MAX_RETRIES,
-      }, { status: 503 });
+      return NextResponse.json({ error: `Upload failed: ${err?.message || "Unknown"}`, chunkIndex, canFallbackToS3: true }, { status: 503 });
     }
   }
 
-  await File.findByIdAndUpdate(fileId, {
-    $set: {
-      status: "paused",
-      lastError: `Chunk ${chunkIndex} failed after ${MAX_RETRIES} retries: ${lastError?.message || "Unknown error"}`,
-    },
-  });
-
-  return NextResponse.json({
-    error: `Chunk ${chunkIndex} failed after ${MAX_RETRIES} retries`,
-    chunkIndex,
-    canFallbackToS3: true,
-    lastError: lastError?.message,
-  }, { status: 503 });
+  await File.findByIdAndUpdate(fileId, { $set: { status: "paused", lastError: `Chunk ${chunkIndex} failed after ${MAX_RETRIES} retries: ${lastError?.message || "Unknown"}` } });
+  return NextResponse.json({ error: `Chunk ${chunkIndex} failed`, canFallbackToS3: true }, { status: 503 });
 }

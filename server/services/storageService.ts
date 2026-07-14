@@ -38,7 +38,7 @@ export async function uploadTelegramChunk(
 
   const hash = createHash("sha256").update(encryptedChunk).digest("hex");
 
-  const filename = `${file.filename}.part${chunkIndex}`;
+  const filename = `chunk_${chunkIndex}.bin`;
   
   const blob = new Blob([new Uint8Array(encryptedChunk)], { type: "application/octet-stream" });
 

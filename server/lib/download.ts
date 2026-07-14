@@ -9,7 +9,6 @@ import EncryptionKeyModel from "@/adapters/database/models/EncryptionKey";
 import { getFile, getFileDownloadUrl } from "@/adapters/storage/telegram";
 import { decryptChunk } from "@/server/services/decryptionService";
 import { parseNonce } from "@/server/lib/crypto";
-import { computeHash } from "@/server/lib/hash";
 
 const PREFETCH = 4;
 
@@ -96,24 +95,21 @@ export async function createTelegramDownloadStream(
         const data = await fetchQueue.get(idx)!;
         fetchQueue.delete(idx);
 
-        const nonce = chunks[idx].nonce ? parseNonce(chunks[idx].nonce) : null;
-
-        let decrypted: Buffer;
-        if (encryptionKey && nonce && nonce.length > 0) {
-          decrypted = decryptChunk(data, nonce, encryptionKey);
-        } else {
-          decrypted = data;
-        }
-
-        if (chunks[idx].hash) {
-          const computedHash = computeHash(data);
-          if (computedHash !== chunks[idx].hash) {
-            controller.error(new Error(`Chunk ${idx} integrity check failed`));
-            return;
+        // Backward compat: decrypt if server-side encryptionKey is present (old method)
+        let output: Buffer;
+        if (encryptionKey) {
+          const nonce = chunks[idx].nonce ? parseNonce(chunks[idx].nonce) : null;
+          if (nonce && nonce.length > 0) {
+            output = decryptChunk(data, nonce, encryptionKey);
+          } else {
+            output = data;
           }
+        } else {
+          // New zero-knowledge mode: stream encrypted data as-is for client to decrypt
+          output = data;
         }
 
-        controller.enqueue(new Uint8Array(decrypted.buffer, decrypted.byteOffset, decrypted.byteLength));
+        controller.enqueue(new Uint8Array(output.buffer, output.byteOffset, output.byteLength));
         idx++;
       } catch (err) {
         controller.error(err as Error);
@@ -147,7 +143,10 @@ export async function createVersionDownloadResponse(
   if (!version) return new Response("Version not found", { status: 404 });
 
   if (version.backend === "telegram") {
-    const encryptionKey = await EncryptionKeyModel.findOne({ fileId }).lean();
+    // Backward compat: look for server-side key for old files
+    const encryptionKey = file.encryptionKey
+      ? await EncryptionKeyModel.findOne({ fileId }).lean()
+      : null;
     return createTelegramDownloadStream(
       version._id.toString(),
       version.size,

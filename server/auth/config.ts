@@ -1,6 +1,7 @@
 import GoogleProvider from 'next-auth/providers/google';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import connectDB from '@/adapters/database/mongoose';
 import User from '@/adapters/database/models/User';
 import NextAuth, { NextAuthOptions } from 'next-auth';
@@ -9,6 +10,8 @@ type AppAuthUser = {
   storageused?: number;
   storagelimit?: number;
 };
+
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -20,6 +23,93 @@ export const authOptions: NextAuthOptions = {
         params: {
           prompt: 'select_account',
         },
+      },
+    }),
+
+    // ── Telegram Login ───────────────────────────────────────────
+    CredentialsProvider({
+      id: 'telegram',
+      name: 'Telegram',
+      credentials: {
+        id: { label: 'Telegram ID', type: 'text' },
+        first_name: { label: 'First Name', type: 'text' },
+        last_name: { label: 'Last Name', type: 'text' },
+        username: { label: 'Username', type: 'text' },
+        photo_url: { label: 'Photo URL', type: 'text' },
+        auth_date: { label: 'Auth Date', type: 'text' },
+        hash: { label: 'Hash', type: 'text' },
+      },
+      async authorize(credentials) {
+        if (!credentials?.id || !credentials?.hash) {
+          throw new Error('Missing Telegram auth data');
+        }
+
+        // Verify Telegram hash
+        const secret = crypto
+          .createHash('sha256')
+          .update(TELEGRAM_BOT_TOKEN)
+          .digest();
+
+        const dataCheckString = Object.entries({
+          auth_date: credentials.auth_date,
+          first_name: credentials.first_name,
+          id: credentials.id,
+          last_name: credentials.last_name,
+          photo_url: credentials.photo_url,
+          username: credentials.username,
+        })
+          .filter(([, v]) => v !== undefined && v !== '')
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([k, v]) => `${k}=${v}`)
+          .join('\n');
+
+        const computedHash = crypto
+          .createHmac('sha256', secret)
+          .update(dataCheckString)
+          .digest('hex');
+
+        if (computedHash !== credentials.hash) {
+          throw new Error('Invalid Telegram auth');
+        }
+
+        // Check auth_date is within 24 hours
+        const authDate = parseInt(credentials.auth_date, 10);
+        if (Date.now() / 1000 - authDate > 86400) {
+          throw new Error('Telegram auth expired');
+        }
+
+        try {
+          await connectDB();
+        } catch {
+          throw new Error('Database error');
+        }
+
+        const telegramId = credentials.id;
+        let user = await User.findOne({
+          provider: 'telegram',
+          providerId: telegramId,
+        });
+
+        if (!user) {
+          user = await User.create({
+            email: `telegram_${telegramId}@telegram.storeit`,
+            name:
+              credentials.first_name +
+              (credentials.last_name ? ` ${credentials.last_name}` : ''),
+            image: credentials.photo_url || null,
+            provider: 'telegram',
+            providerId: telegramId,
+          });
+        }
+
+        return {
+          id: user._id.toString(),
+          name: user.name,
+          email: user.email,
+          image: user.image ?? null,
+          storageused: user.storageused,
+          storagelimit: user.storagelimit,
+        };
       },
     }),
 
@@ -86,7 +176,7 @@ export const authOptions: NextAuthOptions = {
 
    if (!email) {
   console.error("No email returned from Google");
-  return false; // or handle differently
+  return false;
     }
     const existingUser = await User.findOne({ email });
 
@@ -97,7 +187,7 @@ export const authOptions: NextAuthOptions = {
               $set: {
                 name: user.name,
                 image: user.image,
-                provider: 'google', // switch provider
+                provider: 'google',
                 providerId: profile?.sub,
               },
             }
@@ -116,6 +206,7 @@ export const authOptions: NextAuthOptions = {
         return false;
       }
     }
+    // Telegram user was already created/updated in authorize()
     return true;
   },
 
@@ -133,8 +224,8 @@ export const authOptions: NextAuthOptions = {
           token.storagelimit = appUser.storagelimit ?? 5 * 1024 * 1024 * 1024;
         }
 
-        if (account.provider === 'google') {
-          // Google: fetch storage + _id from DB (not in OAuth profile)
+        if (account.provider === 'google' || account.provider === 'telegram') {
+          // Google / Telegram: fetch storage + _id from DB (not in profile)
           try {
             await connectDB();
             const dbUser = await User.findOne({ email: token.email });
@@ -144,7 +235,7 @@ export const authOptions: NextAuthOptions = {
               token.storagelimit = dbUser.storagelimit;
             }
           } catch (err) {
-            console.error('JWT Google DB fetch error:', err);
+            console.error(`JWT ${account.provider} DB fetch error:`, err);
           }
         }
       }

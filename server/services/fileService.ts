@@ -92,7 +92,7 @@ export async function hardDeleteFile(userId: string, fileId: string) {
     await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: file.storageUrl }));
   }
 
-  await EncryptionKeyModel.deleteOne({ fileId: file._id });
+  try { await EncryptionKeyModel.deleteOne({ fileId: file._id }); } catch {}
   await FileVersionModel.deleteMany({ file_id: file._id });
   await File.deleteOne({ _id: fileId, owner_id: userId });
   return file.filename;
@@ -147,7 +147,10 @@ export async function getFileDownload(userId: string, fileId: string, preview: b
   }
 
   if (version?.backend === "telegram") {
-    const encryptionKey = await EncryptionKeyModel.findOne({ fileId: file._id }).lean();
+    // Backward compat: look for server-side key for old files
+    const encryptionKey = file.encryptionKey
+      ? await EncryptionKeyModel.findOne({ fileId: file._id }).lean()
+      : null;
     return {
       kind: "stream" as const,
       versionId: version._id.toString(),

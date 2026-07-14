@@ -2,13 +2,9 @@ import connectDB from "@/adapters/database/mongoose";
 import File from "@/adapters/database/models/File";
 import FileVersionModel from "@/adapters/database/models/FileVersion";
 import TelegramChunk from "@/adapters/database/models/TelegramChunk";
-import EncryptionKey from "@/adapters/database/models/EncryptionKey";
 import User from "@/adapters/database/models/User";
-import { generateEncryptionKey } from "@/server/lib/crypto";
-import { encryptChunkWithNonce } from "@/server/services/encryptionService";
 import { computeHash } from "@/server/lib/hash";
 import { uploadTelegramChunk } from "@/server/services/storageService";
-import { ObjectId } from "mongodb";
 
 export interface InitUploadParams {
   filename: string;
@@ -16,7 +12,6 @@ export interface InitUploadParams {
   size: number;
   hash: string;
   folderId: string | null;
-  useEncryption: boolean;
   fileId?: string;
 }
 
@@ -24,7 +19,6 @@ export interface InitUploadResult {
   fileId: string;
   totalChunks: number;
   chunkSize: number;
-  keyBase64?: string;
   isDuplicate: boolean;
   existingFile?: any;
 }
@@ -32,7 +26,7 @@ export interface InitUploadResult {
 const CHUNK_SIZE = 4 * 1024 * 1024;
 
 export async function initTelegramUpload(params: InitUploadParams): Promise<InitUploadResult> {
-  const { filename, mimeType, size, hash, folderId, useEncryption, fileId } = params;
+  const { filename, mimeType, size, hash, folderId, fileId } = params;
 
   await connectDB();
 
@@ -91,7 +85,6 @@ export async function initTelegramUpload(params: InitUploadParams): Promise<Init
     throw new Error("Storage limit exceeded");
   }
 
-  const { base64: keyBase64 } = generateEncryptionKey();
   const totalChunks = Math.ceil(size / CHUNK_SIZE);
 
   const file = await File.create({
@@ -108,22 +101,12 @@ export async function initTelegramUpload(params: InitUploadParams): Promise<Init
     totalChunks,
     chunkSize: CHUNK_SIZE,
     status: "pending",
-    encryptionKey: keyBase64,
   });
-
-  if (keyBase64) {
-    await EncryptionKey.create({
-      fileId: file._id,
-      keyBase64,
-      algorithm: "aes-256-gcm",
-    });
-  }
 
   return {
     fileId: file._id.toString(),
     totalChunks,
     chunkSize: CHUNK_SIZE,
-    keyBase64,
     isDuplicate: false,
   };
 }
@@ -177,25 +160,26 @@ export async function processChunk(params: ProcessChunkParams): Promise<ProcessC
     };
   }
 
-  const encryptionKey = file.encryptionKey ? Buffer.from(file.encryptionKey, "base64") : null;
-  let encryptedChunk: Buffer;
+  // Backward compat: encrypt with server-side key if present (old method)
+  let dataToStore: Buffer;
   let nonce: Buffer;
-
-  if (encryptionKey && nonceBase64) {
-    nonce = Buffer.from(nonceBase64, "base64");
-    encryptedChunk = encryptChunkWithNonce(plaintext, nonce, encryptionKey);
+  if (file.encryptionKey) {
+    const { encryptChunkWithNonce } = await import("@/server/services/encryptionService");
+    const key = Buffer.from(file.encryptionKey, "base64");
+    nonce = Buffer.from(nonceBase64 || "", "base64");
+    dataToStore = encryptChunkWithNonce(plaintext, nonce, key);
   } else {
-    encryptedChunk = plaintext;
+    dataToStore = plaintext;
     nonce = Buffer.alloc(0);
   }
 
   const plaintextHash = computeHash(plaintext);
-  const hash = computeHash(encryptedChunk);
+  const hash = computeHash(dataToStore);
 
   const result = await uploadTelegramChunk(
     fileId,
     chunkIndex,
-    encryptedChunk,
+    dataToStore,
     plaintextHash,
     nonceBase64,
     plaintext.length

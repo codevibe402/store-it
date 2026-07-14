@@ -4,7 +4,6 @@ import connectDB from "@/adapters/database/mongoose";
 import File from "@/adapters/database/models/File";
 import FileVersion from "@/adapters/database/models/FileVersion";
 import TelegramChunk from "@/adapters/database/models/TelegramChunk";
-import EncryptionKey from "@/adapters/database/models/EncryptionKey";
 import User from "@/adapters/database/models/User";
 import { deleteMessage } from "@/adapters/storage/telegram";
 

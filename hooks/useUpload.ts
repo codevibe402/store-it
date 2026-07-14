@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { getEncryptionPassphrase, deriveKey, encryptChunk } from "./useFileEncryption";
 
 type FileType = {
   _id: string;
@@ -20,6 +21,12 @@ type FileType = {
 type UploadStatus = "idle" | "uploading" | "paused" | "success" | "error" | "duplicate";
 
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
+
+function bufferToBase64(buf: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < buf.length; i++) binary += String.fromCharCode(buf[i]);
+  return btoa(binary);
+}
 
 export function useUpload(currentFolderId: string | null) {
   const queryClient = useQueryClient();
@@ -77,6 +84,8 @@ export function useUpload(currentFolderId: string | null) {
     cancelRef.current = false;
     pauseRef.current = false;
 
+    const passphrase = getEncryptionPassphrase();
+
     try {
       const hash = await getFileHash(file);
 
@@ -115,6 +124,17 @@ export function useUpload(currentFolderId: string | null) {
       }
 
       // Large file: Telegram multipart upload
+      // Zero-knowledge mode: encrypt chunks client-side if passphrase is set
+      let encryptionSalt: string | undefined;
+      let useEncryption = false;
+
+      if (passphrase) {
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        encryptionSalt = bufferToBase64(salt);
+      } else {
+        useEncryption = true; // fallback to server-side encryption
+      }
+
       const initRes = await fetch("/api/files/telegram/init", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -124,7 +144,8 @@ export function useUpload(currentFolderId: string | null) {
           size: file.size,
           hash,
           folderId: targetFolderId,
-          useEncryption: true,
+          useEncryption,
+          encryptionSalt,
         }),
       });
 
@@ -141,11 +162,19 @@ export function useUpload(currentFolderId: string | null) {
         return;
       }
 
-      // Upload chunks in sequence (simpler than concurrent workers)
       const fileId = initData.fileId;
       const totalChunks = initData.totalChunks;
       const chunkSize = initData.chunkSize || 4 * 1024 * 1024;
       let uploadedBytes = 0;
+
+      // Derive key once if using zero-knowledge encryption
+      let cryptoKey: CryptoKey | null = null;
+      if (passphrase && encryptionSalt) {
+        const saltBuf = new Uint8Array(atob(encryptionSalt).length);
+        const binary = atob(encryptionSalt);
+        for (let i = 0; i < binary.length; i++) saltBuf[i] = binary.charCodeAt(i);
+        cryptoKey = await deriveKey(passphrase, saltBuf);
+      }
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -154,14 +183,38 @@ export function useUpload(currentFolderId: string | null) {
         if (cancelRef.current || pauseRef.current) break;
 
         const start = i * chunkSize;
-        const chunkBlob = file.slice(start, Math.min(start + chunkSize, file.size));
+        const end = Math.min(start + chunkSize, file.size);
+        const chunkBlob = file.slice(start, end);
+        const chunkBuf = new Uint8Array(await chunkBlob.arrayBuffer());
+
+        // Encrypt chunk client-side if in zero-knowledge mode
+        let dataToUpload: Blob;
+        let chunkHash: string;
+        let nonce: string | undefined;
+
+        if (cryptoKey) {
+          const { ciphertext, nonce: iv } = await encryptChunk(chunkBuf, cryptoKey);
+          chunkHash = await crypto.subtle.digest("SHA-256", ciphertext).then(h => {
+            const arr = new Uint8Array(h);
+            return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+          });
+          nonce = bufferToBase64(iv);
+          dataToUpload = new Blob([ciphertext], { type: "application/octet-stream" });
+        } else {
+          chunkHash = await crypto.subtle.digest("SHA-256", chunkBuf).then(h => {
+            const arr = new Uint8Array(h);
+            return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+          });
+          dataToUpload = chunkBlob;
+        }
 
         const chunkForm = new FormData();
         chunkForm.append("fileId", fileId);
         chunkForm.append("chunkIndex", String(i));
-        chunkForm.append("hash", await getChunkHash(chunkBlob));
-        chunkForm.append("chunk", chunkBlob);
-        chunkForm.append("useEncryption", "true");
+        chunkForm.append("hash", chunkHash);
+        chunkForm.append("chunk", dataToUpload);
+        if (nonce) chunkForm.append("nonce", nonce);
+        chunkForm.append("useEncryption", cryptoKey ? "false" : "true");
 
         let success = false;
         for (let attempt = 0; attempt < 3 && !success; attempt++) {
@@ -243,12 +296,4 @@ export function useUpload(currentFolderId: string | null) {
     cancelUpload,
     pauseUpload,
   };
-}
-
-function getChunkHash(blob: Blob): Promise<string> {
-  return new Promise(async (resolve) => {
-    const buffer = await blob.arrayBuffer();
-    const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-    resolve(Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join(""));
-  });
 }
