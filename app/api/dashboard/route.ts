@@ -14,7 +14,7 @@ export async function GET() {
     await connectDB();
 
     const [files, folders, pendingFiles] = await Promise.all([
-      File.find({ owner_email: user.email, status: "uploaded" })
+      File.find({ owner_email: user.email, status: "uploaded", deleted: { $ne: true } })
         .select("_id filename mimetype size folderId folders_id backend status createdAt updatedAt owner_id hash")
         .sort({ createdAt: -1 })
         .limit(100)
@@ -28,6 +28,7 @@ export async function GET() {
       File.find({
         owner_email: user.email,
         status: { $in: ["pending", "uploading", "paused", "fallback_cleanup", "s3_pending"] },
+        deleted: { $ne: true },
       })
         .select("_id filename mimetype size folderId folders_id backend status createdAt updatedAt owner_id hash")
         .sort({ createdAt: -1 })
