@@ -5,8 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { CloudUpload, FileText, LoaderCircle } from "lucide-react";
-import { useUpload } from "@/hooks/useUpload";
+import { CloudUpload, FileText, LoaderCircle, CheckCircle, XCircle, AlertCircle } from "lucide-react";
+import { useUpload, UploadEntry } from "@/hooks/useUpload";
 
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 
@@ -52,7 +52,6 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
 
   const uploadHook = useUpload(currentFolderIdState);
 
-  // Fetch pending files from dashboard — show only those not cancelled
   const { data: dashboard } = useQuery<{ pendingFiles: FileType[] }>({
     queryKey: ["dashboard"],
     queryFn: async () => {
@@ -67,14 +66,21 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
   const pendingFiles = dashboard?.pendingFiles ?? [];
   const visiblePendingFiles = pendingFiles.filter((f) => !uploadHook.cancelledIds.current.has(f._id));
 
+  const hasSuccess = uploadHook.uploads.some((u) => u.status === "success");
   useEffect(() => {
-    if (uploadHook.status === "success" && onUploadComplete) {
+    if (hasSuccess && onUploadComplete) {
       onUploadComplete();
     }
-  }, [uploadHook.status, onUploadComplete]);
+  }, [hasSuccess, onUploadComplete]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+
+  const handleFiles = (fileList: FileList) => {
+    for (let i = 0; i < fileList.length; i++) {
+      uploadHook.handleFile(fileList[i], currentFolderIdState);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -86,7 +92,7 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
         )}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
-        onDrop={(e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) uploadHook.handleFile(e.dataTransfer.files[0], currentFolderIdState); }}
+        onDrop={(e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files); }}
         onClick={() => inputRef.current?.click()}
       >
         <input
@@ -97,9 +103,7 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
           onChange={(e) => {
             const fileList = e.target.files;
             if (fileList && fileList.length > 0) {
-              for (let i = 0; i < fileList.length; i++) {
-                uploadHook.handleFile(fileList[i], currentFolderIdState);
-              }
+              handleFiles(fileList);
               e.target.value = "";
             }
           }}
@@ -119,33 +123,37 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
         </div>
       </div>
 
-      {/* Current upload progress */}
-      {uploadHook.status === "uploading" && (
-        <div className="rounded-xl border border-slate-700 bg-[#111827] p-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-300">
-              <FileText className="h-5 w-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-base font-semibold text-slate-100">{uploadHook.currentFileName}</div>
-              <div className="mt-1 flex items-center gap-2 text-sm text-slate-400">
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin text-indigo-300" />
-                Uploading... <span className="text-slate-500">{uploadHook.progress}%</span>
-              </div>
-              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-800">
-                <div className="h-full rounded-full bg-indigo-400 transition-all duration-300" style={{ width: `${uploadHook.progress}%` }} />
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <button onClick={uploadHook.pauseUpload} className="rounded-lg px-3 py-2 text-sm font-medium text-amber-300 transition hover:bg-amber-500/10">Pause</button>
-              <button onClick={uploadHook.cancelUpload} className="rounded-lg px-3 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10">Cancel</button>
-            </div>
+      {/* Upload queue */}
+      {uploadHook.uploads.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-base font-semibold text-slate-100">
+            Uploads ({uploadHook.uploads.length})
+          </h3>
+
+          {/* Global pause/cancel bar */}
+          <div className="flex gap-2">
+            <button
+              onClick={uploadHook.pauseUpload}
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-amber-300 transition hover:bg-amber-500/10"
+            >
+              Pause all
+            </button>
+            <button
+              onClick={uploadHook.cancelUpload}
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-500/10"
+            >
+              Cancel all
+            </button>
           </div>
+
+          {uploadHook.uploads.map((u) => (
+            <UploadRow key={u.id} entry={u} onCancel={() => uploadHook.cancelSingleUpload(u.id)} />
+          ))}
         </div>
       )}
 
-      {/* Pending files from dashboard — informational, requires user to go to /resume */}
-      {visiblePendingFiles.length > 0 && uploadHook.status !== "uploading" && (
+      {/* Pending files from dashboard */}
+      {visiblePendingFiles.length > 0 && uploadHook.uploads.length === 0 && (
         <div className="space-y-3">
           <h3 className="text-base font-semibold text-slate-100">Pending uploads</h3>
           {visiblePendingFiles.map((file) => (
@@ -180,27 +188,76 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
           ))}
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* Success */}
-      {uploadHook.status === "success" && (
-        <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-400">
-          ✓ {uploadHook.currentFileName} uploaded successfully
-        </div>
-      )}
+function UploadRow({ entry, onCancel }: { entry: UploadEntry; onCancel: () => void }) {
+  const inProgress = entry.status === "uploading" || entry.status === "paused";
 
-      {/* Error */}
-      {uploadHook.error && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-          ✕ {uploadHook.error}
+  return (
+    <div className="rounded-xl border border-slate-700 bg-[#111827] p-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+        {/* Icon */}
+        <div className={cn(
+          "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+          entry.status === "success" ? "bg-green-500/15 text-green-300" :
+          entry.status === "error" ? "bg-red-500/15 text-red-300" :
+          entry.status === "duplicate" ? "bg-amber-500/15 text-amber-300" :
+          "bg-indigo-500/15 text-indigo-300"
+        )}>
+          {entry.status === "success" ? <CheckCircle className="h-5 w-5" /> :
+           entry.status === "error" ? <XCircle className="h-5 w-5" /> :
+           entry.status === "duplicate" ? <AlertCircle className="h-5 w-5" /> :
+           <FileText className="h-5 w-5" />}
         </div>
-      )}
 
-      {/* Duplicate */}
-      {uploadHook.duplicateFile && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
-          Duplicate: {uploadHook.duplicateFile.filename} already exists
+        {/* Info */}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-base font-semibold text-slate-100">{entry.filename}</div>
+          <div className="mt-1 text-sm text-slate-400">
+            {formatBytes(entry.size)}
+            {inProgress && (
+              <span> <span className="text-slate-500">•</span> {entry.progress}%</span>
+            )}
+            {entry.status === "paused" && <span className="ml-2 text-amber-300">Paused</span>}
+            {entry.status === "success" && <span className="ml-2 text-green-400">Uploaded</span>}
+            {entry.status === "duplicate" && <span className="ml-2 text-amber-400">Duplicate</span>}
+          </div>
+
+          {/* Progress bar */}
+          {inProgress && (
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-800">
+              <div
+                className="h-full rounded-full bg-indigo-400 transition-all duration-300"
+                style={{ width: `${entry.progress}%` }}
+              />
+            </div>
+          )}
+
+          {/* Error message */}
+          {entry.status === "error" && entry.error && (
+            <div className="mt-2 text-sm text-red-400">{entry.error}</div>
+          )}
         </div>
-      )}
+
+        {/* Actions */}
+        {inProgress && (
+          <div className="flex shrink-0 items-center gap-2">
+            <button onClick={onCancel} className="rounded-lg px-3 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10">
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {entry.status === "success" || entry.status === "error" || entry.status === "duplicate" ? (
+          <div className="flex shrink-0 items-center gap-2">
+            <button onClick={onCancel} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-400 transition hover:bg-slate-800">
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

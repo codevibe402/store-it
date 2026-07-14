@@ -20,6 +20,16 @@ type FileType = {
 
 type UploadStatus = "idle" | "uploading" | "paused" | "success" | "error" | "duplicate";
 
+export type UploadEntry = {
+  id: string;
+  filename: string;
+  size: number;
+  status: UploadStatus;
+  progress: number;
+  error: string;
+  duplicateFile: FileType | null;
+};
+
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 
 function bufferToBase64(buf: Uint8Array): string {
@@ -28,20 +38,54 @@ function bufferToBase64(buf: Uint8Array): string {
   return btoa(binary);
 }
 
+let uploadIdCounter = 0;
+function nextUploadId(): string {
+  return `upload_${Date.now()}_${++uploadIdCounter}`;
+}
+
 export function useUpload(currentFolderId: string | null) {
   const queryClient = useQueryClient();
-  const [status, setStatus] = useState<UploadStatus>("idle");
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState("");
-  const [duplicateFile, setDuplicateFile] = useState<FileType | null>(null);
-  const [currentFileName, setCurrentFileName] = useState("");
+  const [uploads, setUploads] = useState<UploadEntry[]>([]);
 
   const cancelRef = useRef(false);
   const pauseRef = useRef(false);
-  const abortRef = useRef<AbortController | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortControllers = useRef<Map<string, AbortController>>(new Map());
 
   const cancelledIds = useRef(new Set<string>());
+
+  const clearUpload = useCallback((id: string) => {
+    setUploads((prev) => prev.filter((u) => u.id !== id));
+  }, []);
+
+  const updateUpload = useCallback((id: string, patch: Partial<UploadEntry>) => {
+    setUploads((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
+  }, []);
+
+  const cancelUpload = useCallback(() => {
+    cancelRef.current = true;
+    pauseRef.current = false;
+    for (const [id, ctrl] of abortControllers.current) {
+      ctrl.abort();
+    }
+    abortControllers.current.clear();
+    setUploads([]);
+  }, []);
+
+  const pauseUpload = useCallback(() => {
+    pauseRef.current = true;
+    setUploads((prev) =>
+      prev.map((u) => (u.status === "uploading" ? { ...u, status: "paused" as const } : u))
+    );
+  }, []);
+
+  const cancelSingleUpload = useCallback((id: string) => {
+    const ctrl = abortControllers.current.get(id);
+    if (ctrl) {
+      ctrl.abort();
+      abortControllers.current.delete(id);
+    }
+    setUploads((prev) => prev.filter((u) => u.id !== id));
+  }, []);
 
   const getFileHash = async (file: File): Promise<string> => {
     const buffer = await file.arrayBuffer();
@@ -50,47 +94,32 @@ export function useUpload(currentFolderId: string | null) {
     return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   };
 
-  const clearIntervals = () => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-  };
-
-  const cancelUpload = useCallback(() => {
-    cancelRef.current = true;
-    pauseRef.current = false;
-    abortRef.current?.abort();
-    abortRef.current = null;
-    clearIntervals();
-    setStatus("idle");
-    setProgress(0);
-    setCurrentFileName("");
-  }, []);
-
-  const pauseUpload = useCallback(() => {
-    pauseRef.current = true;
-    clearIntervals();
-    setStatus("paused");
-  }, []);
-
   const handleFile = useCallback(async (file: File, folderId?: string | null) => {
     const targetFolderId = folderId ?? currentFolderId;
-    setStatus("uploading");
-    setProgress(0);
-    setCurrentFileName(file.name);
-    setError("");
-    setDuplicateFile(null);
-    cancelRef.current = false;
-    pauseRef.current = false;
+    const id = nextUploadId();
+
+    const entry: UploadEntry = {
+      id,
+      filename: file.name,
+      size: file.size,
+      status: "uploading",
+      progress: 0,
+      error: "",
+      duplicateFile: null,
+    };
+    setUploads((prev) => [...prev, entry]);
 
     const passphrase = getEncryptionPassphrase();
+    const controller = new AbortController();
+    abortControllers.current.set(id, controller);
 
     try {
       const hash = await getFileHash(file);
 
       if (file.size <= SMALL_FILE_LIMIT) {
-        intervalRef.current = setInterval(() => setProgress((p) => (p < 85 ? p + 8 : p)), 150);
+        const progressInterval = setInterval(() => {
+          updateUpload(id, { progress: Math.min(85, entry.progress + 8) });
+        }, 150);
 
         const formData = new FormData();
         formData.append("file", file);
@@ -100,15 +129,14 @@ export function useUpload(currentFolderId: string | null) {
         const res = await fetch("/api/files/upload", {
           method: "POST",
           body: formData,
+          signal: controller.signal,
         });
 
-        clearIntervals();
+        clearInterval(progressInterval);
 
         if (res.status === 409) {
           const body = await res.json();
-          setStatus("duplicate");
-          setDuplicateFile(body.existingFile);
-          setProgress(0);
+          updateUpload(id, { status: "duplicate", duplicateFile: body.existingFile, progress: 0 });
           return;
         }
 
@@ -117,14 +145,12 @@ export function useUpload(currentFolderId: string | null) {
           throw new Error(body.error || `Upload failed (${res.status})`);
         }
 
-        setProgress(100);
-        setStatus("success");
+        updateUpload(id, { status: "success", progress: 100 });
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
         return;
       }
 
       // Large file: Telegram multipart upload
-      // Zero-knowledge mode: encrypt chunks client-side if passphrase is set
       let encryptionSalt: string | undefined;
       let useEncryption = false;
 
@@ -132,7 +158,7 @@ export function useUpload(currentFolderId: string | null) {
         const salt = crypto.getRandomValues(new Uint8Array(16));
         encryptionSalt = bufferToBase64(salt);
       } else {
-        useEncryption = true; // fallback to server-side encryption
+        useEncryption = true;
       }
 
       const initRes = await fetch("/api/files/telegram/init", {
@@ -147,6 +173,7 @@ export function useUpload(currentFolderId: string | null) {
           useEncryption,
           encryptionSalt,
         }),
+        signal: controller.signal,
       });
 
       if (!initRes.ok) {
@@ -156,9 +183,7 @@ export function useUpload(currentFolderId: string | null) {
 
       const initData = await initRes.json();
       if (initData.isDuplicate) {
-        clearIntervals();
-        setStatus("duplicate");
-        setDuplicateFile(initData.existingFile);
+        updateUpload(id, { status: "duplicate", duplicateFile: initData.existingFile, progress: 0 });
         return;
       }
 
@@ -167,7 +192,6 @@ export function useUpload(currentFolderId: string | null) {
       const chunkSize = initData.chunkSize || 4 * 1024 * 1024;
       let uploadedBytes = 0;
 
-      // Derive key once if using zero-knowledge encryption
       let cryptoKey: CryptoKey | null = null;
       if (passphrase && encryptionSalt) {
         const saltBuf = new Uint8Array(atob(encryptionSalt).length);
@@ -176,18 +200,15 @@ export function useUpload(currentFolderId: string | null) {
         cryptoKey = await deriveKey(passphrase, saltBuf);
       }
 
-      const controller = new AbortController();
-      abortRef.current = controller;
-
       for (let i = 0; i < totalChunks; i++) {
         if (cancelRef.current || pauseRef.current) break;
+        if (controller.signal.aborted) break;
 
         const start = i * chunkSize;
         const end = Math.min(start + chunkSize, file.size);
         const chunkBlob = file.slice(start, end);
         const chunkBuf = new Uint8Array(await chunkBlob.arrayBuffer());
 
-        // Encrypt chunk client-side if in zero-knowledge mode
         let dataToUpload: Blob;
         let chunkHash: string;
         let nonce: string | undefined;
@@ -218,7 +239,7 @@ export function useUpload(currentFolderId: string | null) {
 
         let success = false;
         for (let attempt = 0; attempt < 3 && !success; attempt++) {
-          if (cancelRef.current || pauseRef.current) break;
+          if (cancelRef.current || pauseRef.current || controller.signal.aborted) break;
           try {
             const chunkRes = await fetch("/api/files/telegram/chunk", {
               method: "POST",
@@ -232,32 +253,30 @@ export function useUpload(currentFolderId: string | null) {
             } else {
               success = true;
               uploadedBytes += chunkBlob.size;
-              setProgress(Math.round((uploadedBytes / file.size) * 100));
+              updateUpload(id, { progress: Math.round((uploadedBytes / file.size) * 100) });
             }
           } catch (err: unknown) {
-            if (cancelRef.current || pauseRef.current) break;
+            if (cancelRef.current || pauseRef.current || controller.signal.aborted) break;
             const e = err as Error & { isCancelled?: boolean; canFallbackToS3?: boolean };
             if (e.isCancelled) break;
             if (e.canFallbackToS3 && attempt >= 2) throw e;
             if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
           }
         }
-        if (!success && !cancelRef.current && !pauseRef.current) {
+        if (!success && !cancelRef.current && !pauseRef.current && !controller.signal.aborted) {
           throw new Error(`Chunk ${i} failed after 3 attempts`);
         }
       }
 
-      abortRef.current = null;
-      controller.abort();
+      abortControllers.current.delete(id);
 
       if (cancelRef.current) {
-        setStatus("idle");
-        setProgress(0);
+        setUploads((prev) => prev.filter((u) => u.id !== id));
         return;
       }
 
       if (pauseRef.current) {
-        setStatus("paused");
+        updateUpload(id, { status: "paused" });
         return;
       }
 
@@ -265,35 +284,30 @@ export function useUpload(currentFolderId: string | null) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileId }),
+        signal: controller.signal,
       });
 
       if (!completeRes.ok) throw new Error("Failed to complete upload");
 
-      setProgress(100);
-      setStatus("success");
+      updateUpload(id, { status: "success", progress: 100 });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     } catch (err: unknown) {
+      abortControllers.current.delete(id);
       const e = err as Error & { isCancelled?: boolean };
-      if (e.isCancelled) return;
-      setStatus("error");
-      setError(e.message || "Upload failed");
-      clearIntervals();
+      if (e.isCancelled || controller.signal.aborted) {
+        setUploads((prev) => prev.filter((u) => u.id !== id));
+        return;
+      }
+      updateUpload(id, { status: "error", error: e.message || "Upload failed" });
     }
-  }, [currentFolderId, queryClient]);
+  }, [currentFolderId, queryClient, updateUpload]);
 
   return {
-    status,
-    setStatus,
-    progress,
-    error,
-    setError,
-    duplicateFile,
-    currentFileName,
-    resumingId: null as string | null,
-    setResumingId: () => {},
+    uploads,
     cancelledIds,
     handleFile,
     cancelUpload,
+    cancelSingleUpload,
     pauseUpload,
   };
 }
