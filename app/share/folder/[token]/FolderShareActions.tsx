@@ -5,12 +5,14 @@ import { ChangeEvent, FormEvent, useState } from "react";
 type Props = {
   token: string;
   canAdd: boolean;
+  folderId?: string;
 };
 
-export default function FolderShareActions({ token, canAdd }: Props) {
+export default function FolderShareActions({ token, canAdd, folderId }: Props) {
   const [folderName, setFolderName] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const qs = folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
 
   if (!canAdd) return null;
 
@@ -23,7 +25,7 @@ export default function FolderShareActions({ token, canAdd }: Props) {
     const formData = new FormData();
     formData.append("file", file);
 
-    const res = await fetch(`/api/share/folder/${token}/upload`, {
+    const res = await fetch(`/api/shared/${token}/upload${qs}`, {
       method: "POST",
       body: formData,
     });
@@ -49,7 +51,7 @@ export default function FolderShareActions({ token, canAdd }: Props) {
     setBusy(true);
     setMessage("");
 
-    const res = await fetch(`/api/share/folder/${token}/folders`, {
+    const res = await fetch(`/api/shared/${token}/folders${qs}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),

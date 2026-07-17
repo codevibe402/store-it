@@ -6,12 +6,12 @@ import { ServiceError } from "@/server/services/shareService";
 export async function POST(req: NextRequest) {
   try {
     const user = await getAuthUser();
-    if (!user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!user?.userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json();
     const { fileId } = body as { fileId: string };
 
-    const file = await confirmFile(fileId);
+    const file = await confirmFile(user.userId, fileId);
     return NextResponse.json({ file }, { status: 200 });
   } catch (err) {
     if (err instanceof ServiceError) return NextResponse.json({ error: err.message }, { status: err.status });

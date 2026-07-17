@@ -47,15 +47,20 @@ async function resumeUpload(
   pauseRef.current = false;
   if (handle) {
     resumeHandleCache.set(pendingFile._id, handle);
-    storeFile(pendingFile._id, {
-      fileId: pendingFile._id,
-      handle,
-      filename: file.name,
-      size: file.size,
-      lastModified: file.lastModified,
-      storedAt: Date.now(),
-    }).catch(() => {});
   }
+  // Always persist a recoverable copy keyed by fileId, so a future refresh
+  // can resume without reselecting. Prefer the handle (cheaper — IndexedDB
+  // just stores a reference); fall back to the file content itself when no
+  // handle is available (e.g. browsers without the File System Access API).
+  storeFile(pendingFile._id, {
+    fileId: pendingFile._id,
+    handle,
+    blob: handle ? undefined : file,
+    filename: file.name,
+    size: file.size,
+    lastModified: file.lastModified,
+    storedAt: Date.now(),
+  }).catch(() => {});
 
   try {
     await resumeTelegramUpload(
@@ -159,8 +164,10 @@ export function useResume() {
   const pauseSingleResume = useCallback(async (pf: FileType) => {
     pauseRef.current = true;
     cancelRef.current = false;
-    abortRef.current?.abort();
-    abortRef.current = null;
+    // Don't abort here: chunk workers already stop picking up new chunks as
+    // soon as pauseRef flips (see telegramWorker.ts), and any chunk still in
+    // flight is left to finish naturally instead of having its connection
+    // torn down mid-upload.
     updateEntry(pf._id, { status: "paused" });
 
     try {
@@ -198,7 +205,35 @@ export function useResume() {
       return;
     }
 
-    // No cache — show file picker
+    // Try IndexedDB lookup (survives a page refresh, unlike the in-memory caches above).
+    // Records store either a reopenable handle (File System Access API) or,
+    // when that API isn't available, the file content itself as a Blob.
+    for (const key of [pf._id, `${pf.filename}|${pf.size}`]) {
+      const record = await getFile(key).catch(() => undefined);
+      if (!record) continue;
+
+      if (record.handle) {
+        try {
+          const h = record.handle;
+          if (await h.queryPermission({ mode: "read" }) !== "granted") {
+            await h.requestPermission({ mode: "read" });
+          }
+          const f = await h.getFile();
+          resumeHandleCache.set(pf._id, h);
+          await handleResume(pf, f, h);
+          return;
+        } catch {
+          resumeHandleCache.delete(key);
+          await removeFile(key).catch(() => {});
+        }
+      } else if (record.blob) {
+        const f = new File([record.blob], record.filename, { lastModified: record.lastModified });
+        await handleResume(pf, f, undefined);
+        return;
+      }
+    }
+
+    // No cache anywhere — only now fall back to prompting the user
     let pickResult: { file: File; handle?: FileSystemFileHandle } | null = null;
     for (let attempt = 0; attempt < 2 && !pickResult; attempt++) {
       if (typeof showOpenFilePicker === "function") {
@@ -213,41 +248,6 @@ export function useResume() {
       }
     }
     if (!pickResult) return;
-
-    // Try IndexedDB lookup
-    const fromDB = await getFile(pf._id);
-    if (fromDB) {
-      const h = fromDB.handle;
-      try {
-        if (await h.queryPermission({ mode: "read" }) !== "granted") {
-          await h.requestPermission({ mode: "read" });
-        }
-        const f = await h.getFile();
-        resumeHandleCache.set(pf._id, h);
-        await handleResume(pf, f, h);
-        return;
-      } catch {
-        resumeHandleCache.delete(pf._id);
-        await removeFile(pf._id).catch(() => {});
-      }
-    }
-    const identityKey = `${pf.filename}|${pf.size}`;
-    const byIdentity = await getFile(identityKey);
-    if (byIdentity) {
-      const h = byIdentity.handle;
-      try {
-        if (await h.queryPermission({ mode: "read" }) !== "granted") {
-          await h.requestPermission({ mode: "read" });
-        }
-        const f = await h.getFile();
-        resumeHandleCache.set(pf._id, h);
-        await handleResume(pf, f, h);
-        return;
-      } catch {
-        resumeHandleCache.delete(identityKey);
-        await removeFile(identityKey).catch(() => {});
-      }
-    }
 
     if (pickResult.handle) {
       resumeHandleCache.set(pf._id, pickResult.handle);

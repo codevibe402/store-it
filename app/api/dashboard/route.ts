@@ -20,7 +20,7 @@ export async function GET() {
         .limit(100)
         .lean(),
 
-      Folder.find({ owner_email: user.email })
+      Folder.find({ owner_email: user.email, deleted: { $ne: true } })
         .select("name owner_id parent_id createdAt _id")
         .sort({ createdAt: -1 })
         .lean(),
@@ -45,7 +45,12 @@ export async function GET() {
       folders,
       pendingFiles: pendingFiles.map(normalizeFile),
     });
-    response.headers.set("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
+    // Client-side (TanStack Query) already owns caching/staleness for this
+    // endpoint. An HTTP-level cache here fights it: mutations that call
+    // invalidateQueries(["dashboard"]) trigger a fetch that the browser can
+    // silently serve from its own cache instead of hitting the server,
+    // resurrecting just-deleted/renamed data for up to `max-age`.
+    response.headers.set("Cache-Control", "private, no-store");
 
     return response;
   } catch (error) {

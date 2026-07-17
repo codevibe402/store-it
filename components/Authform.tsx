@@ -29,7 +29,6 @@ import {
 import { Input } from "./ui/input"
 import { sanitizeEmail, sanitizeUsername, sanitizePassword } from "@/shared/security"
 import { TelegramLoginButton } from "./TelegramLoginButton"
-import { setEncryptionPassphrase, clearEncryptionPassphrase } from "@/hooks/useFileEncryption"
 
 type FormType = "sign-up" | "sign-in"
 
@@ -253,18 +252,6 @@ async function onSubmit(data: FormValues) {
         </Button>
         <div className="flex justify-center">
           <TelegramLoginButton />
-        </div>
-        <div className="flex flex-col gap-2 w-full border-t border-border pt-3 mt-1">
-          <label className="text-xs text-muted-foreground">Encryption Passphrase (for zero-knowledge encryption)</label>
-          <Input
-            type="password"
-            placeholder="Enter encryption passphrase"
-            onChange={(e) => {
-              if (e.target.value) setEncryptionPassphrase(e.target.value)
-              else clearEncryptionPassphrase()
-            }}
-          />
-          <p className="text-[10px] text-muted-foreground/60">Used to encrypt your files so even the server can&apos;t read them. Enter the same passphrase each session to access your files.</p>
         </div>
       </CardFooter>
     </Card>

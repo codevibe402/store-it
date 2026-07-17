@@ -19,6 +19,15 @@ const UserSchema = new mongoose.Schema({
   storageused:  { type: Number, default: 0 },
   storagelimit: { type: Number, default: 5 * 1024 * 1024 * 1024 },
   createdAt: { type: Date, default: Date.now },
+  // Zero-knowledge file encryption: the account's Data Encryption Key (DEK)
+  // is generated client-side and never sent to the server in the clear. The
+  // server only ever stores it wrapped (encrypted) by a key derived from a
+  // recovery code that's shown to the user once. This lets a new device
+  // recover file access without the server ever being able to decrypt files.
+  encryptionRecoveryWrapped: { type: String, default: null },
+  encryptionRecoveryNonce:   { type: String, default: null },
+  encryptionRecoverySalt:    { type: String, default: null },
+  encryptionSetupAt:         { type: Date, default: null },
 });
 
 

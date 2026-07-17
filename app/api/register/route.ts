@@ -46,7 +46,8 @@ export async function POST(req: Request) {
       { message: 'Account created successfully' },
       { status: 201 }
     )
-  } catch {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  } catch (err) {
+    console.error("Register error:", err);
+    return NextResponse.json({ error: 'Internal server error', detail: String(err) }, { status: 500 })
   }
 }

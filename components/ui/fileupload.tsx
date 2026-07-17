@@ -8,6 +8,7 @@ import { twMerge } from "tailwind-merge";
 import { CloudUpload, FileText, LoaderCircle, CheckCircle, XCircle, AlertCircle, RotateCcw } from "lucide-react";
 import { useUpload, UploadEntry } from "@/hooks/useUpload";
 import { useResume } from "@/hooks/useResume";
+import { getAllQueueItems, removeQueueItem } from "@/client/lib/uploadQueueDB";
 
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 
@@ -78,10 +79,51 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
-  const handleFiles = (fileList: FileList) => {
+  const handleFiles = (fileList: FileList, handles?: (FileSystemFileHandle | null)[]) => {
     for (let i = 0; i < fileList.length; i++) {
-      uploadHook.handleFile(fileList[i], currentFolderIdState);
+      uploadHook.handleFile(fileList[i], currentFolderIdState, handles?.[i] ?? undefined);
     }
+  };
+
+  // Restore persisted upload queue on mount
+  useEffect(() => {
+    uploadHook.restoreQueue(currentFolderIdState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleBrowseClick = async () => {
+    if (typeof showOpenFilePicker === "function") {
+      try {
+        const fileHandles = await showOpenFilePicker({ multiple: true });
+        for (const fh of fileHandles) {
+          const file = await fh.getFile();
+          uploadHook.handleFile(file, currentFolderIdState, fh);
+        }
+        return;
+      } catch (err) {
+        if ((err as { name?: string })?.name === "AbortError") return;
+        // API failed or unavailable — fall back to the plain input below.
+        // handleFile() still persists these via a stored Blob (see useUpload),
+        // so resume-after-refresh works even without a FileSystemFileHandle.
+      }
+    }
+    inputRef.current?.click();
+  };
+
+  const extractHandles = async (items: DataTransferItemList): Promise<(FileSystemFileHandle | null)[]> => {
+    const handles: (FileSystemFileHandle | null)[] = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].kind === "file" && typeof (items[i] as any).getAsFileSystemHandle === "function") {
+        try {
+          handles.push(await (items[i] as any).getAsFileSystemHandle() as FileSystemFileHandle);
+        } catch {
+          handles.push(null);
+        }
+      } else {
+        handles.push(null);
+      }
+    }
+    return handles;
   };
 
   return (
@@ -94,8 +136,8 @@ export default function FileUpload({ currentFolderId = null, onUploadComplete }:
         )}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
-        onDrop={(e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files); }}
-        onClick={() => inputRef.current?.click()}
+        onDrop={async (e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length > 0) { const handles = await extractHandles(e.dataTransfer.items); handleFiles(e.dataTransfer.files, handles); } }}
+        onClick={handleBrowseClick}
       >
         <input
           ref={inputRef}
@@ -338,7 +380,7 @@ function UploadRow({ entry, onPause, onResume, onCancel }: { entry: UploadEntry;
 
         {entry.status === "success" || entry.status === "error" || entry.status === "duplicate" ? (
           <div className="flex shrink-0 items-center gap-2">
-            <button onClick={onCancel} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-400 transition hover:bg-slate-800">
+            <button onClick={() => { onCancel(); removeQueueItem(entry.id).catch(() => {}); }} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-400 transition hover:bg-slate-800">
               Dismiss
             </button>
           </div>

@@ -1,5 +1,7 @@
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import FolderShareActions from "./FolderShareActions";
+import SharePasswordGate from "./SharePasswordGate";
 
 type ShareFile = {
   fileId: string;
@@ -10,12 +12,23 @@ type ShareFile = {
   downloadUrl: string;
 };
 
+type ShareSubfolder = { id: string; name: string };
+
 type ShareData = {
+  folderId: string;
   folderName: string;
-  permission: "read" | "add";
+  linkRole: "viewer" | "editor";
+  canUpload: boolean;
+  canCreateFolder: boolean;
   expiresAt: string;
   files: ShareFile[];
+  subfolders: ShareSubfolder[];
 };
+
+type FetchResult =
+  | { kind: "ok"; data: ShareData }
+  | { kind: "requiresPassword" }
+  | { kind: "notFound" };
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -35,29 +48,46 @@ function getFileIcon(mimetype: string): string {
   return "📁";
 }
 
-async function fetchShareData(token: string): Promise<ShareData | null> {
+async function fetchShareData(token: string, folderId?: string): Promise<FetchResult> {
   try {
     const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    const res = await fetch(`${base}/api/share/folder/${token}/folders`, {
+    const qs = folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
+    // Server Components don't automatically forward the incoming request's
+    // cookies to an outbound fetch — this is a separate HTTP call as far
+    // as Next is concerned. Forward them explicitly so a password-gated
+    // link's session cookie (set by SharePasswordGate's POST) is actually
+    // sent, letting the browse call succeed without asking again.
+    const cookieHeader = (await cookies()).getAll().map((c) => `${c.name}=${c.value}`).join("; ");
+
+    const res = await fetch(`${base}/api/shared/${token}${qs}`, {
       cache: "no-store",
+      headers: { cookie: cookieHeader },
     });
-    if (!res.ok) return null;
-    return res.json();
+    if (res.status === 401) return { kind: "requiresPassword" };
+    if (!res.ok) return { kind: "notFound" };
+    return { kind: "ok", data: await res.json() };
   } catch {
-    return null;
+    return { kind: "notFound" };
   }
 }
 
 export default async function FolderSharePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<{ folderId?: string }>;
 }) {
   const { token } = await params;
-  const data = await fetchShareData(token);
+  const { folderId } = await searchParams;
+  const result = await fetchShareData(token, folderId);
 
-  if (!data) notFound();
+  if (result.kind === "requiresPassword") {
+    return <SharePasswordGate token={token} />;
+  }
+  if (result.kind === "notFound") notFound();
 
+  const data = result.data;
   const totalSize = data.files.reduce((acc, f) => acc + f.size, 0);
   const expiresDate = data.expiresAt
     ? new Date(data.expiresAt).toLocaleDateString("en-US", {
@@ -138,23 +168,58 @@ export default async function FolderSharePage({
           border-radius: 8px; padding: 8px 10px; min-width: 0;
         }
         .share-add-message { font-size: 0.78rem; color: #fbbf24; }
+        .back-link {
+          display: inline-block; font-size: 0.8rem; color: #6c8eff; text-decoration: none;
+          margin-bottom: 14px;
+        }
+        .back-link:hover { text-decoration: underline; }
+        .folder-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+        .folder-card {
+          background: #13161e; border: 1px solid #252a38; border-radius: 12px;
+          padding: 13px 16px; display: flex; align-items: center; gap: 12px;
+          text-decoration: none; color: inherit; transition: border-color 0.15s;
+        }
+        .folder-card:hover { border-color: #6c8eff55; }
+        .role-badge {
+          display: inline-block; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.03em;
+          text-transform: uppercase; padding: 2px 8px; border-radius: 99px; margin-left: 8px;
+          background: rgba(108,142,255,0.12); color: #6c8eff; vertical-align: middle;
+        }
       `}</style>
 
       <div className="page">
         <div className="badge">📁 Shared folder</div>
-        <h1>{data.folderName}</h1>
+        {folderId && (
+          <a className="back-link" href={`/share/folder/${token}`}>← Back to root</a>
+        )}
+        <h1>{data.folderName}<span className="role-badge">{data.linkRole}</span></h1>
         <p className="meta">
+          <span>{data.subfolders.length} folder{data.subfolders.length !== 1 ? "s" : ""}</span>
+          {" · "}
           <span>{data.files.length} file{data.files.length !== 1 ? "s" : ""}</span>
           {" · "}
           <span>{formatBytes(totalSize)}</span>
           {expiresDate && <>{" · "} Expires {expiresDate}</>}
         </p>
 
-        <FolderShareActions token={token} canAdd={data.permission === "add"} />
+        <FolderShareActions token={token} canAdd={data.canUpload && data.canCreateFolder} folderId={data.folderId} />
 
-        {data.files.length === 0 ? (
+        {data.subfolders.length > 0 && (
+          <div className="folder-list">
+            {data.subfolders.map((f) => (
+              <a key={f.id} className="folder-card" href={`/share/folder/${token}?folderId=${f.id}`}>
+                <div className="file-icon">📁</div>
+                <div className="file-info">
+                  <div className="file-name">{f.name}</div>
+                </div>
+              </a>
+            ))}
+          </div>
+        )}
+
+        {data.files.length === 0 && data.subfolders.length === 0 ? (
           <div className="empty">This folder is empty.</div>
-        ) : (
+        ) : data.files.length === 0 ? null : (
           <div className="file-list">
             {data.files.map((file) => (
               <div key={file.fileId} className="file-card">

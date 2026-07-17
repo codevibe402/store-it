@@ -1,6 +1,11 @@
 export interface UploadRecord {
   fileId: string
-  handle: FileSystemFileHandle
+  // Present when the File System Access API gave us a reopenable handle.
+  handle?: FileSystemFileHandle
+  // Fallback (and, in browsers without the File System Access API, the only
+  // option): the actual file content, stored as a Blob so IndexedDB can back
+  // it with disk rather than holding it in memory.
+  blob?: Blob
   filename: string
   size: number
   lastModified: number
@@ -8,7 +13,11 @@ export interface UploadRecord {
 }
 
 const DB_NAME = "StoreItResume"
-const DB_VERSION = 2
+// Shared physical IndexedDB database with client/lib/uploadQueueDB.ts (same
+// DB_NAME) — the version must stay in sync with that module's DB_VERSION, and
+// onupgradeneeded must (re-)create both modules' stores, since whichever
+// module opens the DB first is the one that runs the upgrade.
+const DB_VERSION = 3
 const STORE_NAME = "files"
 const RECORD_TTL = 24 * 60 * 60 * 1000
 
@@ -21,6 +30,9 @@ function openDB(): Promise<IDBDatabase> {
       const db = request.result
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME)
+      }
+      if (!db.objectStoreNames.contains("uploadQueue")) {
+        db.createObjectStore("uploadQueue")
       }
     }
     request.onsuccess = () => {

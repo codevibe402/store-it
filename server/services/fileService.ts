@@ -21,7 +21,7 @@ export async function moveFile(userId: string, fileId: string, folderId: string 
 
   if (folderId !== null) {
     if (!ObjectId.isValid(folderId)) throw new ServiceError("Invalid folderId", 400);
-    const folder = await Folder.findOne({ _id: folderId, owner_id: userId }).lean();
+    const folder = await Folder.findOne({ _id: folderId, owner_id: userId, deleted: { $ne: true } }).lean();
     if (!folder) throw new ServiceError("Target folder not found", 404);
   }
 
@@ -50,7 +50,7 @@ export async function renameFile(userId: string, fileId: string, body: { filenam
       throw new ServiceError("Invalid folderId", 400);
     }
     if (body.folderId !== null) {
-      const folder = await Folder.findOne({ _id: body.folderId, owner_id: userId }).lean();
+      const folder = await Folder.findOne({ _id: body.folderId, owner_id: userId, deleted: { $ne: true } }).lean();
       if (!folder) throw new ServiceError("Target folder not found", 404);
     }
     update.folderId = body.folderId;
@@ -116,12 +116,13 @@ export async function restoreFile(userId: string, fileId: string) {
   return file;
 }
 
-export async function confirmFile(fileId: string) {
+export async function confirmFile(userId: string, fileId: string) {
   if (!fileId) throw new ServiceError("fileId is required", 400);
   await connectDB();
 
   const file = await File.findById(fileId);
   if (!file) throw new ServiceError("File not found", 404);
+  if (String(file.owner_id) !== userId) throw new ServiceError("Forbidden", 403);
 
   if (file.status === "uploaded") return file;
 
@@ -167,6 +168,62 @@ export async function getFileDownload(userId: string, fileId: string, preview: b
   const url = await createS3DownloadUrl(storageUrl, file.filename, file.mimetype, disposition as "inline" | "attachment");
 
   return { kind: "redirect" as const, url };
+}
+
+// Describes how to fetch+decrypt a file client-side. Only telegram-backed
+// files encrypted with the account's zero-knowledge DEK (encryptionMode ===
+// 'dek') need this — everything else is served by the existing download
+// route (server-decrypted, or never encrypted, or S3-redirected).
+export async function getFileManifest(userId: string, fileId: string, versionId?: string | null) {
+  if (!ObjectId.isValid(fileId)) throw new ServiceError("Invalid file id", 400);
+  await connectDB();
+
+  const file = await File.findOne({ _id: fileId, owner_id: userId, status: "uploaded" }).lean();
+  if (!file) throw new ServiceError("File not found", 404);
+
+  let version;
+  if (versionId) {
+    version = await FileVersionModel.findById(versionId).lean();
+  } else if (file.currentVersionId) {
+    version = await FileVersionModel.findById(file.currentVersionId).lean();
+  }
+
+  const requiresClientDecrypt = version?.backend === "telegram" && file.encryptionMode === "dek";
+
+  if (!requiresClientDecrypt) {
+    return { requiresClientDecrypt: false as const };
+  }
+
+  const chunks = await TelegramChunk.find({ versionId: version!._id })
+    .sort({ chunkIndex: 1 })
+    .select("chunkIndex nonce size")
+    .lean();
+
+  return {
+    requiresClientDecrypt: true as const,
+    versionId: version!._id.toString(),
+    filename: file.filename,
+    mimetype: version!.mimetype,
+    totalSize: version!.size,
+    chunks: chunks.map((c) => ({ index: c.chunkIndex, nonce: c.nonce, size: c.size })),
+  };
+}
+
+// Raw ciphertext bytes for one chunk — never decrypted server-side, since
+// for 'dek'-mode files the server never has the key. Ownership is checked
+// via the parent File the same way as every other file endpoint.
+export async function getFileChunkData(userId: string, fileId: string, versionId: string, chunkIndex: number) {
+  if (!ObjectId.isValid(fileId)) throw new ServiceError("Invalid file id", 400);
+  await connectDB();
+
+  const file = await File.findOne({ _id: fileId, owner_id: userId, status: "uploaded" }).lean();
+  if (!file) throw new ServiceError("File not found", 404);
+  if (file.encryptionMode !== "dek") throw new ServiceError("File does not require client-side decryption", 409);
+
+  const chunk = await TelegramChunk.findOne({ versionId, chunkIndex }).lean();
+  if (!chunk) throw new ServiceError("Chunk not found", 404);
+
+  return chunk;
 }
 
 export async function checkDuplicateFile(

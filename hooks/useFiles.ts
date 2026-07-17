@@ -3,6 +3,9 @@
 import { useState, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
+import { toast } from "sonner";
+import { getSessionDEK } from "./useFileEncryption";
+import { fetchManifest, fetchAndDecryptFile } from "@/client/lib/decryptedDownload";
 
 type FileType = {
   _id: string;
@@ -39,29 +42,66 @@ export function useFiles(files: FileType[], folders: FolderType[]) {
   const [versionTarget, setVersionTarget] = useState<FileType | null>(null);
   const [versions, setVersions] = useState<any[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
-  const [shareTarget, setShareTarget] = useState<{ type: "file"; item: FileType } | { type: "folder"; item: FolderType } | null>(null);
-  const [shareUrl, setShareUrl] = useState("");
-  const [shareCopied, setShareCopied] = useState(false);
-  const [sharePermission, setSharePermission] = useState<"read" | "add">("read");
-  const [shareExpiresInDays, setShareExpiresInDays] = useState(7);
+  // File sharing only — folder sharing has its own richer state/actions in
+  // hooks/useFolderShare.ts (people + role management, links, revoke).
+  const [fileShareTarget, setFileShareTarget] = useState<FileType | null>(null);
+  const [fileShareUrl, setFileShareUrl] = useState("");
+  const [fileShareCopied, setFileShareCopied] = useState(false);
 
-  const openFile = (file: FileType) => {
-    window.open(`/api/files/${file._id}/download?preview=1`, "_blank");
+  // Zero-knowledge (DEK-encrypted) files can't just be opened at their raw
+  // URL — the server never has the key, so that would hand the browser
+  // ciphertext. Check the manifest first; only files that actually need
+  // client-side decryption take the fetch-chunks-and-decrypt path, so
+  // everything else (S3, server-managed encryption, unencrypted) is
+  // untouched and just as fast as before.
+  const resolveDecryptedBlobUrl = async (file: FileType): Promise<string | null> => {
+    const manifest = await fetchManifest(file._id);
+    if (!manifest.requiresClientDecrypt) return null;
+
+    const dek = getSessionDEK();
+    if (!dek) {
+      toast.error("This file is encrypted and this device isn't unlocked yet. Enter your recovery code to access it.");
+      return "";
+    }
+
+    const blob = await fetchAndDecryptFile(file._id, manifest, dek);
+    return window.URL.createObjectURL(blob);
+  };
+
+  const openFile = async (file: FileType) => {
+    if (file.backend !== "telegram") {
+      window.open(`/api/files/${file._id}/download?preview=1`, "_blank");
+      return;
+    }
+    try {
+      const decryptedUrl = await resolveDecryptedBlobUrl(file);
+      if (decryptedUrl === "") return; // missing DEK, already toasted
+      window.open(decryptedUrl ?? `/api/files/${file._id}/download?preview=1`, "_blank");
+    } catch {
+      toast.error("Failed to open file");
+    }
   };
 
   const downloadFile = async (file: FileType) => {
     try {
-      const res = await fetch(`/api/files/${file._id}/download`);
-      if (!res.ok) throw new Error("Download failed");
-      const blob = await res.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
+      let blobUrl: string | null = null;
+      if (file.backend === "telegram") {
+        const decryptedUrl = await resolveDecryptedBlobUrl(file);
+        if (decryptedUrl === "") return; // missing DEK, already toasted
+        blobUrl = decryptedUrl;
+      }
+      if (!blobUrl) {
+        const res = await fetch(`/api/files/${file._id}/download`);
+        if (!res.ok) throw new Error("Download failed");
+        blobUrl = window.URL.createObjectURL(await res.blob());
+      }
       const a = document.createElement("a");
       a.href = blobUrl;
       a.download = file.filename;
       a.click();
       window.URL.revokeObjectURL(blobUrl);
     } catch {
-      // Handle error
+      toast.error("Download failed");
     }
   };
 
@@ -96,52 +136,24 @@ export function useFiles(files: FileType[], folders: FolderType[]) {
   };
 
   const openShareModal = async (file: FileType) => {
-    setShareTarget({ type: "file", item: file });
-    setShareUrl("");
-    setShareCopied(false);
+    setFileShareTarget(file);
+    setFileShareUrl("");
+    setFileShareCopied(false);
     try {
       const res = await fetch(`/api/files/${file._id}/share`, { method: "POST" });
       if (!res.ok) throw new Error("Failed");
       const { shareUrl: url } = await res.json();
-      setShareUrl(url);
+      setFileShareUrl(url);
     } catch {
-      setShareTarget(null);
+      setFileShareTarget(null);
     }
   };
 
-  const openFolderShareModal = async (folder: FolderType, permission: "read" | "add" = "read") => {
-    setShareTarget({ type: "folder", item: folder });
-    setShareUrl("");
-    setShareCopied(false);
-    setSharePermission(permission);
-    try {
-      const res = await fetch(`/api/folders/${folder._id}/share`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ permission, expiresInDays: shareExpiresInDays }),
-      });
-      if (!res.ok) throw new Error("Failed");
-      const { shareUrl: url } = await res.json();
-      setShareUrl(url);
-    } catch {
-      setShareTarget(null);
-    }
-  };
-
-  const copyShareUrl = async (fileOrFolder: FileType | FolderType, isFolder = false) => {
-    try {
-      const endpoint = isFolder
-        ? `/api/folders/${(fileOrFolder as FolderType)._id}/share`
-        : `/api/files/${(fileOrFolder as FileType)._id}/share`;
-      const res = await fetch(endpoint, { method: "POST" });
-      if (!res.ok) throw new Error("Failed");
-      const { shareUrl: url } = await res.json();
-      navigator.clipboard.writeText(url);
-      setShareCopied(true);
-      setTimeout(() => setShareCopied(false), 2000);
-    } catch {
-      // Handle error
-    }
+  const copyFileShareUrl = () => {
+    if (!fileShareUrl) return;
+    navigator.clipboard.writeText(fileShareUrl);
+    setFileShareCopied(true);
+    setTimeout(() => setFileShareCopied(false), 2000);
   };
 
   const duplicateFile = async (file: FileType) => {
@@ -245,23 +257,16 @@ export function useFiles(files: FileType[], folders: FolderType[]) {
     versions,
     versionsLoading,
     setVersionsLoading,
-    shareTarget,
-    setShareTarget,
-    shareUrl,
-    setShareUrl,
-    shareCopied,
-    setShareCopied,
-    sharePermission,
-    setSharePermission,
-    shareExpiresInDays,
-    setShareExpiresInDays,
+    fileShareTarget,
+    setFileShareTarget,
+    fileShareUrl,
+    fileShareCopied,
     openFile,
     downloadFile,
     downloadFolder,
     moveFile,
     openShareModal,
-    openFolderShareModal,
-    copyShareUrl,
+    copyFileShareUrl,
     duplicateFile,
     renameFile,
     openVersions,

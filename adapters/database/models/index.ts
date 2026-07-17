@@ -8,3 +8,6 @@ export { default as FolderShare } from './Foldershare';
 export { default as FileShare } from './Fileshare';
 export { default as RefreshToken } from './RefreshToken';
 export { default as EncryptionKey } from './EncryptionKey';
+export { default as FolderPermission } from './FolderPermission';
+export { default as ShareLink } from './ShareLink';
+export { default as IdempotencyKey } from './IdempotencyKey';

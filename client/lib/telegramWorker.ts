@@ -66,7 +66,14 @@ export async function resumeTelegramUpload(
   const lock = { current: 0 };
 
   async function worker() {
-    while (!cancelRef.current && !pauseRef.current && !signal.aborted) {
+    while (!cancelRef.current && !signal.aborted) {
+      // Pause is graceful: stop picking up NEW chunks, but don't tear down a
+      // chunk that's already in flight — aborting it mid-transfer just kills
+      // the connection server-side for no benefit (the request already sent
+      // its data and is doing real work), and wastes the upload. Only Cancel
+      // and unrecoverable errors abort in-flight requests.
+      if (pauseRef.current) return;
+
       const index = lock.current++;
       if (index >= totalChunks) break;
       if (alreadyUploaded.has(index)) continue;
@@ -85,13 +92,13 @@ export async function resumeTelegramUpload(
       let success = false;
       for (let attempt = 0; attempt < 3 && !success; attempt++) {
         try {
-          if (cancelRef.current || pauseRef.current || signal.aborted) {
+          if (cancelRef.current || signal.aborted) {
             throw { isCancelled: true };
           }
           const res = await fetch("/api/files/telegram/chunk", {
             method: "POST", body: formData, signal,
           });
-          if (cancelRef.current || pauseRef.current || signal.aborted) {
+          if (cancelRef.current || signal.aborted) {
             throw { isCancelled: true };
           }
 if (!res.ok) {
@@ -106,7 +113,7 @@ if (!res.ok) {
           // Ensure progress is at least 1% for first chunk
           onProgress(Math.max(1, progress));
          } catch (err: unknown) {
-          if (cancelRef.current || pauseRef.current || signal.aborted) {
+          if (cancelRef.current || signal.aborted) {
             throw { isCancelled: true };
           }
           const chunkError = err as TelegramChunkError;
@@ -126,14 +133,16 @@ if (!res.ok) {
   try {
     await Promise.all(workers);
   } catch (err: unknown) {
+    // A real cancel or an unrecoverable chunk error — no reason for the
+    // other workers to keep going, so cut them off now.
     abortRef.current = null;
-    cancelRef.current = true;
     controller.abort();
     throw err;
   }
   abortRef.current = null;
 
-  if (cancelRef.current || pauseRef.current) throw { isCancelled: true };
+  if (cancelRef.current) throw { isCancelled: true };
+  if (pauseRef.current) throw { isCancelled: true };
 
   const completeRes = await fetch("/api/files/telegram/complete", {
     method: "POST", headers: { "Content-Type": "application/json" },

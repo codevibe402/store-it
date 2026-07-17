@@ -45,6 +45,9 @@ export async function POST(req: NextRequest) {
   if (!file) {
     return NextResponse.json({ error: "File record not found" }, { status: 404 });
   }
+  if (file.owner_email !== user.email) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   if (file.status !== "uploaded") {
     const existingByName = file.status === "pending"

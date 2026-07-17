@@ -123,6 +123,11 @@ export async function createTelegramDownloadStream(
       "Content-Type": mimetype || "application/octet-stream",
       "Content-Disposition": `${disposition}; filename="${filename}"`,
       "Content-Length": totalSize.toString(),
+      // Content per version is immutable once uploaded, so it's safe to cache
+      // hard. `private` (not `public`) since this is an authenticated,
+      // per-user stream — only the requesting browser should cache it, not
+      // shared proxies/CDNs. Matches the 24h TTL used for S3-backed files.
+      "Cache-Control": "private, max-age=86400, immutable",
     },
   });
 }

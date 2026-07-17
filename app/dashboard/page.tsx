@@ -17,11 +17,14 @@ import {
   Archive,
 } from "lucide-react";
 import FileUpload from "@/components/ui/fileupload";
+import FolderCard from "@/components/folders/FolderCard";
 import { useFiles } from "@/hooks/useFiles";
 import { useFolders } from "@/hooks/useFolders";
+import { useFolderShare } from "@/hooks/useFolderShare";
 import { ShareDialog, DeleteDialog, VersionsDialog, MoveDialog } from "@/components/dialogs";
 import RecycleBinSidebar from "@/components/RecycleBinSidebar";
-import RightSidebar from "@/components/RightSidebar";
+import LogoutButton from "@/components/LogoutButton";
+
 
 type FileType = {
   _id: string;
@@ -79,12 +82,15 @@ export default function DashboardPage() {
   const [search, setSearch] = useState("");
   const [sortOrder, setSortOrder] = useState("recent");
   const [filter, setFilter] = useState("all");
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
-  const [ctxMenuTarget, setCtxMenuTarget] = useState<{ fileId: string; element: HTMLElement } | null>(null);
+  const [ctxMenuTarget, setCtxMenuTarget] = useState<
+    { type: "folder"; item: FolderType; element: HTMLElement } | { type: "file"; item: FileType; element: HTMLElement } | null
+  >(null);
   const ctxMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -112,12 +118,35 @@ export default function DashboardPage() {
   const files = useMemo(() => dashboard?.files ?? [], [dashboard?.files]);
   const folders = useMemo(() => dashboard?.folders ?? [], [dashboard?.folders]);
 
+  const selectedFolder = useMemo(
+    () => folders.find((f) => f._id === selectedFolderId) ?? null,
+    [folders, selectedFolderId]
+  );
+  const currentFolderId = selectedFolderId;
+
+  const currentFolders = useMemo(
+    () => folders.filter((f) => (f.parent_id ?? null) === currentFolderId),
+    [folders, currentFolderId]
+  );
+
+  const folderFileCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const f of files) {
+      if (f.folderId) {
+        counts[f.folderId] = (counts[f.folderId] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [files]);
+
   const fileActions = useFiles(files, folders);
-  const folderActions = useFolders(folders, null);
+  const folderActions = useFolders(folders, currentFolderId);
+  const folderShare = useFolderShare();
 
   const visibleFiles = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     let filtered = files.filter((f) => {
+      if ((f.folderId ?? null) !== currentFolderId) return false;
       if (normalizedSearch && !f.filename.toLowerCase().includes(normalizedSearch)) return false;
       switch (filter) {
         case "images": return f.mimetype.startsWith("image/");
@@ -132,11 +161,11 @@ export default function DashboardPage() {
       case "size": return filtered.sort((a, b) => (b.size || 0) - (a.size || 0));
       default: return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
-  }, [files, search, filter, sortOrder]);
+  }, [files, search, filter, sortOrder, currentFolderId]);
 
   const handleCreateFolder = async () => {
     if (!newFolderName.trim()) return;
-    const ok = await folderActions.createFolder(newFolderName.trim(), null);
+    const ok = await folderActions.createFolder(newFolderName.trim(), currentFolderId);
     if (ok) {
       setNewFolderName("");
       setShowNewFolder(false);
@@ -151,9 +180,27 @@ export default function DashboardPage() {
     setCtxMenuTarget(null);
   };
 
-  const openMenu = (folder: FolderType, btn: HTMLElement) => {
-    setCtxMenuTarget({ fileId: folder._id, element: btn });
+  const handleFolderContextMenu = (e: React.MouseEvent, folder: FolderType) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenuTarget({ type: "folder", item: folder, element: e.currentTarget as HTMLElement });
   };
+
+  const handleFileContextMenu = (e: React.MouseEvent, file: FileType) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenuTarget({ type: "file", item: file, element: e.currentTarget as HTMLElement });
+  };
+
+  const openFolder = (folder: FolderType) => {
+    setSelectedFolderId(folder._id);
+  };
+
+  const goBackToRoot = () => {
+    setSelectedFolderId(null);
+  };
+
+
 
   return (
     <div className="flex min-h-screen bg-[linear-gradient(180deg,#0b1220_0%,#111827_100%)] text-slate-100">
@@ -165,6 +212,7 @@ export default function DashboardPage() {
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500 text-lg font-bold text-white shadow-lg shadow-indigo-950/30">S</div>
               <h1 className="text-xl font-semibold tracking-tight text-white">StoreIt</h1>
             </div>
+            <LogoutButton className="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm font-medium text-red-300 transition hover:border-red-500/50 hover:bg-red-500/10" />
           </header>
 
           <section className="py-8">
@@ -230,16 +278,53 @@ export default function DashboardPage() {
           )}
 
           <section className="py-8">
-            <FileUpload currentFolderId={null} />
+            <FileUpload currentFolderId={currentFolderId} />
           </section>
+
+          {selectedFolder && (
+            <section className="pb-4">
+              <button
+                onClick={goBackToRoot}
+                className="flex items-center gap-1.5 text-sm text-indigo-300 hover:text-indigo-200 transition"
+              >
+                ← Back to all folders
+              </button>
+              <h2 className="mt-2 text-xl font-semibold text-white">{selectedFolder.name}</h2>
+            </section>
+          )}
+
+          {currentFolders.length > 0 && (
+            <section className="pb-8">
+              <div className="mb-4">
+                <p className="text-sm font-medium text-indigo-300">
+                  {selectedFolder ? "Subfolders" : "Your folders"}
+                </p>
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
+                {currentFolders.map((folder) => (
+                  <FolderCard
+                    key={folder._id}
+                    folder={folder}
+                    fileCount={folderFileCounts[folder._id] || 0}
+                    onClick={() => openFolder(folder)}
+                    onContextMenu={handleFolderContextMenu}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="pb-8">
             <div className="mb-5 flex items-end justify-between">
               <div>
-                <p className="text-sm font-medium text-indigo-300">Recently uploaded</p>
+                <p className="text-sm font-medium text-indigo-300">
+                  {selectedFolder ? `Files in ${selectedFolder.name}` : "Recently uploaded"}
+                </p>
                 <h2 className="mt-1 text-xl font-semibold text-white">Files ({visibleFiles.length})</h2>
               </div>
-              <button onClick={() => router.push("/all-files")} type="button" className="text-sm font-medium text-indigo-300 transition hover:text-indigo-200">View all</button>
+              {!selectedFolder && (
+                <button onClick={() => router.push("/all-files")} type="button" className="text-sm font-medium text-indigo-300 transition hover:text-indigo-200">View all</button>
+              )}
             </div>
 
             {isLoading ? (
@@ -247,7 +332,7 @@ export default function DashboardPage() {
             ) : visibleFiles.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-600 bg-slate-900/40 py-16 text-center">
                 <FolderIcon className="mx-auto h-10 w-10 text-slate-500" />
-                <p className="mt-3 text-sm text-slate-400">No files match your current filters.</p>
+                <p className="mt-3 text-sm text-slate-400">{selectedFolder ? "This folder is empty." : "No files match your current filters."}</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -275,6 +360,14 @@ export default function DashboardPage() {
                       >
                         Download
                       </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleFileContextMenu(e, file)}
+                        className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
+                        aria-label={`More options for ${file.filename}`}
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
                     </div>
                   </article>
                 ))}
@@ -283,76 +376,83 @@ export default function DashboardPage() {
           </section>
         </div>
       </main>
-      <RightSidebar folders={folders} />
-
       {/* 3-dot context menu */}
       {ctxMenuTarget && (() => {
-        const folder = folders.find((f) => f._id === ctxMenuTarget.fileId);
-        if (!folder) return null;
         const rect = ctxMenuTarget.element.getBoundingClientRect();
+        const menuStyle = {
+          top: Math.min(rect.bottom + 4, window.innerHeight - 300),
+          left: Math.min(rect.right - 176, window.innerWidth - 184),
+        };
+
+        if (ctxMenuTarget.type === "folder") {
+          const folder = ctxMenuTarget.item;
+          return (
+            <div
+              ref={ctxMenuRef}
+              className="fixed z-40 w-44 rounded-xl border border-slate-700 bg-[#111827] p-1.5 shadow-2xl shadow-black/40"
+              style={menuStyle}
+            >
+              {renameId === folder._id ? (
+                <div className="px-2 py-1.5">
+                  <input
+                    autoFocus
+                    className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white outline-none"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleRenameSubmit(folder);
+                      if (e.key === "Escape") { setRenameId(null); setCtxMenuTarget(null); }}
+                    }
+                  />
+                  <div className="flex gap-1 mt-1">
+                    <button onClick={() => handleRenameSubmit(folder)} className="flex-1 px-2 py-1 text-[10px] rounded bg-indigo-500 text-white hover:bg-indigo-400">OK</button>
+                    <button onClick={() => { setRenameId(null); setCtxMenuTarget(null); }} className="flex-1 px-2 py-1 text-[10px] rounded border border-gray-600 text-gray-400 hover:bg-gray-800">Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <button onClick={() => { folderShare.openFolderShare(folder); setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-200 transition hover:bg-slate-800">Share</button>
+                  <button onClick={() => { setRenameId(folder._id); setRenameValue(folder.name); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-200 transition hover:bg-slate-800">Rename</button>
+                  <button onClick={() => { folderActions.deleteFolder(folder._id); if (selectedFolderId === folder._id) setSelectedFolderId(null); setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 transition hover:bg-red-500/10">Delete</button>
+                </>
+              )}
+            </div>
+          );
+        }
+
+        const file = ctxMenuTarget.item;
         return (
           <div
             ref={ctxMenuRef}
             className="fixed z-40 w-44 rounded-xl border border-slate-700 bg-[#111827] p-1.5 shadow-2xl shadow-black/40"
-            style={{
-              top: Math.min(rect.bottom + 4, window.innerHeight - 300),
-              left: Math.min(rect.right - 176, window.innerWidth - 184),
-            }}
+            style={menuStyle}
           >
-            {renameId === folder._id ? (
-              <div className="px-2 py-1.5">
-                <input
-                  autoFocus
-                  className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white outline-none"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleRenameSubmit(folder);
-                    if (e.key === "Escape") { setRenameId(null); setCtxMenuTarget(null); }}
-                  }
-                />
-                <div className="flex gap-1 mt-1">
-                  <button onClick={() => handleRenameSubmit(folder)} className="flex-1 px-2 py-1 text-[10px] rounded bg-indigo-500 text-white hover:bg-indigo-400">OK</button>
-                  <button onClick={() => { setRenameId(null); setCtxMenuTarget(null); }} className="flex-1 px-2 py-1 text-[10px] rounded border border-gray-600 text-gray-400 hover:bg-gray-800">Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <button onClick={() => { setRenameId(folder._id); setRenameValue(folder.name); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-200 transition hover:bg-slate-800">Rename</button>
-                <button onClick={() => { folderActions.deleteFolder(folder._id); setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 transition hover:bg-red-500/10">Delete</button>
-              </>
-            )}
+            <button onClick={() => { fileActions.openShareModal(file); setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-200 transition hover:bg-slate-800">Share</button>
+            <button onClick={() => { fileActions.setMoveTarget(file); setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-200 transition hover:bg-slate-800">Move</button>
+            <button onClick={() => { fileActions.openVersions(file); setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-200 transition hover:bg-slate-800">Version history</button>
+            <button onClick={() => { fileActions.setDeleteTarget({ type: "file", item: file }); setCtxMenuTarget(null); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 transition hover:bg-red-500/10">Delete</button>
           </div>
         );
       })()}
 
       <ShareDialog
-        shareTarget={fileActions.shareTarget as any}
-        setShareTarget={fileActions.setShareTarget as any}
-        shareUrl={fileActions.shareUrl}
-        setShareUrl={fileActions.setShareUrl}
-        shareCopied={fileActions.shareCopied}
-        setShareCopied={fileActions.setShareCopied}
-        sharePermission={fileActions.sharePermission}
-        setSharePermission={fileActions.setSharePermission}
-        shareExpiresInDays={fileActions.shareExpiresInDays}
-        setShareExpiresInDays={fileActions.setShareExpiresInDays}
-        onCopyUrl={() => {
-          if (fileActions.shareTarget) {
-            const isFolder = fileActions.shareTarget.type === "folder";
-            fileActions.copyShareUrl(fileActions.shareTarget.item, isFolder);
-          }
-        }}
-        onGenerateFolderShare={() => {
-          if (fileActions.shareTarget?.type === "folder") {
-            fileActions.openFolderShareModal(fileActions.shareTarget.item, fileActions.sharePermission);
-          }
-        }}
-        onGenerateFileShare={() => {
-          if (fileActions.shareTarget?.type === "file") {
-            fileActions.openShareModal(fileActions.shareTarget.item);
-          }
-        }}
+        fileTarget={fileActions.fileShareTarget}
+        onCloseFile={() => fileActions.setFileShareTarget(null)}
+        fileShareUrl={fileActions.fileShareUrl}
+        fileShareCopied={fileActions.fileShareCopied}
+        onCopyFileShareUrl={fileActions.copyFileShareUrl}
+        folderTarget={folderShare.folderTarget}
+        onCloseFolder={folderShare.closeFolderShare}
+        access={folderShare.access}
+        accessLoading={folderShare.accessLoading}
+        newLinkUrl={folderShare.newLinkUrl}
+        linkCopied={folderShare.linkCopied}
+        busy={folderShare.busy}
+        onCopyLink={folderShare.copyLink}
+        onShareWithUser={folderShare.shareWithUser}
+        onCreateLink={folderShare.createLink}
+        onRevokeGrant={folderShare.revokeGrant}
+        onRevokeLink={folderShare.revokeLink}
       />
       <DeleteDialog
         deleteTarget={fileActions.deleteTarget as any}
@@ -372,7 +472,7 @@ export default function DashboardPage() {
         setMoveTarget={fileActions.setMoveTarget as any}
         folders={folders}
         uploadedFiles={files.filter((f) => f.status === "uploaded")}
-        currentFolderId={null}
+        currentFolderId={currentFolderId}
         newFolderName={newFolderName}
         setNewFolderName={setNewFolderName}
         onCreateFolder={async () => {

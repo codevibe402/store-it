@@ -6,6 +6,7 @@ import TelegramChunk from "@/adapters/database/models/TelegramChunk";
 import { sendDocument, deleteMessage } from "@/adapters/storage/telegram";
 import { encryptChunkWithNonce } from "@/server/services/encryptionService";
 import { computeHash } from "@/server/lib/hash";
+import { canUploadToFile } from "@/server/services/uploadAccess";
 import crypto from "crypto";
 
 const MAX_RETRIES = 3;
@@ -41,7 +42,13 @@ export async function POST(req: NextRequest) {
 
   const file = await File.findById(fileId);
   if (!file) return NextResponse.json({ error: "File not found", status: 404 });
-  if (file.owner_email !== user.email) return NextResponse.json({ error: "Forbidden", status: 403 });
+  // Re-checked on every single chunk, not just once at init — the
+  // permission-revoked-mid-upload and folder-moved/ownership-transferred
+  // -mid-upload requirements both need this to be live, not cached from
+  // whatever was true when the upload started.
+  if (!(await canUploadToFile(user.userId, file))) {
+    return NextResponse.json({ error: "Forbidden", status: 403 }, { status: 403 });
+  }
   if (file.backend !== "telegram") return NextResponse.json({ error: "File is not using Telegram backend", status: 409 });
   if (!["pending", "uploading", "paused"].includes(file.status)) {
     return NextResponse.json({ error: `File is in "${file.status}" state`, status: 409 });
@@ -58,6 +65,13 @@ export async function POST(req: NextRequest) {
   }
 
   const chunkBuffer = Buffer.from(await chunkFile.arrayBuffer());
+
+  // Client already disconnected (e.g. genuine cancel, which does abort
+  // in-flight requests) — no point spending a Telegram API call + DB write
+  // on a response nobody will read.
+  if (req.signal.aborted) {
+    return NextResponse.json({ error: "Request aborted" }, { status: 499 });
+  }
 
   // Backward compat: if file has server-side encryptionKey, encrypt on server (old method)
   let dataToStore: Buffer;

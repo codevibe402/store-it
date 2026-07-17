@@ -78,7 +78,43 @@ export function useFolders(folders: FolderType[], currentFolderId: string | null
       const res = await fetch(`/api/folders/${folderId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed");
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+    onMutate: async (folderId: string) => {
+      await queryClient.cancelQueries({ queryKey: ["dashboard"] });
+      const prev = queryClient.getQueryData<DashboardData>(["dashboard"]);
+
+      queryClient.setQueryData<DashboardData>(["dashboard"], (old) => {
+        if (!old) return old;
+        // Hide the folder and every descendant instantly, matching what the
+        // background cascade will do server-side (deleted folders + their
+        // files disappear from the UI right away instead of waiting on it).
+        const toRemove = new Set<string>([folderId]);
+        let added = true;
+        while (added) {
+          added = false;
+          for (const f of old.folders) {
+            if (!toRemove.has(f._id) && f.parent_id && toRemove.has(f.parent_id)) {
+              toRemove.add(f._id);
+              added = true;
+            }
+          }
+        }
+        return {
+          ...old,
+          folders: old.folders.filter((f) => !toRemove.has(f._id)),
+        };
+      });
+
+      return { prev };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) queryClient.setQueryData(["dashboard"], context.prev);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      // The background cascade moves contained files into the recycle bin;
+      // refresh it so it reflects that once the cascade catches up.
+      queryClient.invalidateQueries({ queryKey: ["recycle"] });
+    },
   });
 
   const renameFolder = useMutation({

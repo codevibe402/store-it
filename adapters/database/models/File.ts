@@ -32,6 +32,12 @@ const FileSchema = new Schema({
    currentVersionId: { type: Schema.Types.ObjectId, default: null },
    encryptionIv: { type: String, default: null },
    encryptionKey: { type: String, default: null },
+   // 'dek': encrypted client-side with the account's zero-knowledge DEK —
+   //        server never has the key, client must decrypt on download.
+   // 'server': encrypted with a server-held per-file key (encryptionKey) —
+   //           server decrypts transparently, backward-compat mode.
+   // 'none': stored as plaintext.
+   encryptionMode: { type: String, enum: ['dek', 'server', 'none'], default: 'none' },
    deleted: { type: Boolean, default: false, index: true },
    deletedAt: { type: Date, default: null },
 }, { timestamps: true });

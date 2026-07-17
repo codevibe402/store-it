@@ -2,7 +2,10 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getEncryptionPassphrase, deriveKey, encryptChunk } from "./useFileEncryption";
+import { getSessionDEK, encryptChunk } from "./useFileEncryption";
+import { storeQueueItem, removeQueueItem, getAllQueueItems } from "@/client/lib/uploadQueueDB";
+import { storeFile as storeResumeFile } from "@/client/lib/indexedDB";
+import { resumeTelegramUpload } from "@/client/lib/telegramWorker";
 
 type FileType = {
   _id: string;
@@ -37,8 +40,6 @@ type UploadMeta = {
   totalChunks: number;
   chunkSize: number;
   hash: string;
-  encryptionSalt?: string;
-  passphrase?: string | null;
 };
 
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
@@ -63,6 +64,8 @@ export function useUpload(currentFolderId: string | null) {
   const pausedIds = useRef(new Set<string>());
   const abortControllers = useRef<Map<string, AbortController>>(new Map());
   const uploadMeta = useRef<Map<string, UploadMeta>>(new Map());
+  const restoredFiles = useRef<Map<string, File>>(new Map());
+  const handleFileRef = useRef<((file: File, folderId?: string | null, handle?: FileSystemFileHandle) => Promise<void>) | null>(null);
 
   const cancelledIds = useRef(new Set<string>());
 
@@ -80,7 +83,11 @@ export function useUpload(currentFolderId: string | null) {
     abortControllers.current.clear();
     setUploads([]);
     uploadMeta.current.clear();
-  }, []);
+    // Remove all entries from IndexedDB
+    for (const u of uploads) {
+      removeQueueItem(u.id).catch(() => {});
+    }
+  }, [uploads]);
 
   const pauseUpload = useCallback(() => {
     setUploads((prev) => {
@@ -96,7 +103,9 @@ export function useUpload(currentFolderId: string | null) {
     if (ctrl) ctrl.abort();
     abortControllers.current.delete(id);
     uploadMeta.current.delete(id);
+    restoredFiles.current.delete(id);
     setUploads((prev) => prev.filter((u) => u.id !== id));
+    removeQueueItem(id).catch(() => {});
   }, []);
 
   const pauseSingleUpload = useCallback((id: string) => {
@@ -107,13 +116,63 @@ export function useUpload(currentFolderId: string | null) {
   }, []);
 
   const resumeSingleUpload = useCallback(async (id: string) => {
+    // Check if this is a restored file (from IndexedDB queue, not yet init'd)
+    const restoredFile = restoredFiles.current.get(id);
+    if (restoredFile) {
+      restoredFiles.current.delete(id);
+      pausedIds.current.delete(id);
+
+      // Try to find a pending server record for proper resume
+      try {
+        const dashRes = await fetch("/api/dashboard");
+        if (dashRes.ok) {
+          const dashData = await dashRes.json();
+          const pendingFiles: any[] = dashData.pendingFiles ?? [];
+          const match = pendingFiles.find(
+            (pf: any) => pf.filename === restoredFile.name && pf.size === restoredFile.size && pf.backend === "telegram"
+          );
+          if (match) {
+            const fileId = match._id;
+            const cancelRef = { current: false };
+            const pauseRef = { current: false };
+            const abortRef = { current: null as AbortController | null };
+            updateUpload(id, { status: "uploading", progress: 1, error: "" });
+            try {
+              await resumeTelegramUpload(fileId, restoredFile, (pct) => {
+                updateUpload(id, { progress: pct });
+              }, cancelRef, pauseRef, abortRef);
+              updateUpload(id, { status: "success", progress: 100 });
+              removeQueueItem(id).catch(() => {});
+              queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+            } catch (err: any) {
+              if (err?.isCancelled) {
+                setUploads((prev) => prev.filter((u) => u.id !== id));
+              } else {
+                updateUpload(id, { status: "error", error: err?.message || "Resume failed" });
+              }
+            }
+            return;
+          }
+        }
+      } catch {
+        // Dashboard fetch failed, fall through to fresh upload
+      }
+
+      // No matching server record — start fresh
+      setUploads((prev) => prev.filter((u) => u.id !== id));
+      removeQueueItem(id).catch(() => {});
+      const hf = handleFileRef.current;
+      if (hf) await hf(restoredFile, currentFolderId);
+      return;
+    }
+
     const meta = uploadMeta.current.get(id);
     if (!meta) return;
 
     pausedIds.current.delete(id);
     updateUpload(id, { status: "uploading", progress: 0, error: "" });
 
-    const { file, fileId, totalChunks, chunkSize, hash, encryptionSalt, passphrase } = meta;
+    const { file, fileId, totalChunks, chunkSize, hash } = meta;
     const controller = new AbortController();
     abortControllers.current.set(id, controller);
 
@@ -128,13 +187,10 @@ export function useUpload(currentFolderId: string | null) {
         uploadedBytes = resumeData.uploadedBytes ?? 0;
       }
 
-      let cryptoKey: CryptoKey | null = null;
-      if (passphrase && encryptionSalt) {
-        const saltBuf = new Uint8Array(atob(encryptionSalt).length);
-        const binary = atob(encryptionSalt);
-        for (let i = 0; i < binary.length; i++) saltBuf[i] = binary.charCodeAt(i);
-        cryptoKey = await deriveKey(passphrase, saltBuf);
-      }
+      // The DEK is a stable per-account key (unlike the old per-file
+      // passphrase-derived key), so resuming just re-reads it fresh — no
+      // per-file salt/derivation needed.
+      const cryptoKey = getSessionDEK();
 
       for (let i = 0; i < totalChunks; i++) {
         if (cancelRef.current || pausedIds.current.has(id) || controller.signal.aborted) break;
@@ -207,8 +263,11 @@ export function useUpload(currentFolderId: string | null) {
 
       abortControllers.current.delete(id);
 
+      abortControllers.current.delete(id);
+
       if (cancelRef.current) {
         setUploads((prev) => prev.filter((u) => u.id !== id));
+        removeQueueItem(id).catch(() => {});
         return;
       }
 
@@ -228,17 +287,19 @@ export function useUpload(currentFolderId: string | null) {
 
       updateUpload(id, { status: "success", progress: 100 });
       uploadMeta.current.delete(id);
+      removeQueueItem(id).catch(() => {});
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     } catch (err: unknown) {
       abortControllers.current.delete(id);
       const e = err as Error & { isCancelled?: boolean };
       if (e.isCancelled || controller.signal.aborted || pausedIds.current.has(id)) {
         setUploads((prev) => prev.filter((u) => u.id !== id));
+        removeQueueItem(id).catch(() => {});
         return;
       }
       updateUpload(id, { status: "error", error: e.message || "Upload failed" });
     }
-  }, [queryClient, updateUpload]);
+  }, [queryClient, updateUpload, currentFolderId]);
 
   const uploadChunks = useCallback(async (
     id: string,
@@ -247,8 +308,6 @@ export function useUpload(currentFolderId: string | null) {
     totalChunks: number,
     chunkSize: number,
     cryptoKey: CryptoKey | null,
-    passphrase: string | null | undefined,
-    encryptionSalt: string | undefined,
     controller: AbortController,
     existingUploadedBytes: number,
     existingUploadedIndexes: Set<number>,
@@ -327,7 +386,11 @@ export function useUpload(currentFolderId: string | null) {
     return uploadedBytes;
   }, [updateUpload]);
 
-  const handleFile = useCallback(async (file: File, folderId?: string | null) => {
+  const removeFromQueue = useCallback(async (id: string) => {
+    await removeQueueItem(id).catch(() => {});
+  }, []);
+
+  const handleFile = useCallback(async (file: File, folderId?: string | null, handle?: FileSystemFileHandle) => {
     const targetFolderId = folderId ?? currentFolderId;
     const id = nextUploadId();
 
@@ -342,7 +405,33 @@ export function useUpload(currentFolderId: string | null) {
     };
     setUploads((prev) => [...prev, entry]);
 
-    const passphrase = getEncryptionPassphrase();
+    // Persist to IndexedDB so the file survives page refresh
+    if (handle) {
+      storeQueueItem(id, {
+        id,
+        filename: file.name,
+        size: file.size,
+        lastModified: file.lastModified,
+        type: file.type,
+        storedAt: Date.now(),
+        handle,
+      }).catch(() => {});
+    } else if (file.size <= SMALL_FILE_LIMIT) {
+      const data = await file.arrayBuffer().catch(() => null);
+      if (data) {
+        storeQueueItem(id, {
+          id,
+          filename: file.name,
+          size: file.size,
+          lastModified: file.lastModified,
+          type: file.type,
+          storedAt: Date.now(),
+          data,
+        }).catch(() => {});
+      }
+    }
+
+    const dek = getSessionDEK();
     const controller = new AbortController();
     abortControllers.current.set(id, controller);
 
@@ -379,20 +468,16 @@ export function useUpload(currentFolderId: string | null) {
         }
 
         updateUpload(id, { status: "success", progress: 100 });
+        removeQueueItem(id).catch(() => {});
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
         return;
       }
 
-      // Large file: Telegram multipart upload
-      let encryptionSalt: string | undefined;
-      let useEncryption = false;
-
-      if (passphrase) {
-        const salt = crypto.getRandomValues(new Uint8Array(16));
-        encryptionSalt = bufferToBase64(salt);
-      } else {
-        useEncryption = true;
-      }
+      // Large file: Telegram multipart upload. Prefer the account's
+      // zero-knowledge DEK when this device has it unlocked; fall back to
+      // server-managed encryption if not, so uploads never block on it.
+      const useDek = !!dek;
+      const useEncryption = !dek;
 
       const initRes = await fetch("/api/files/telegram/init", {
         method: "POST",
@@ -404,7 +489,7 @@ export function useUpload(currentFolderId: string | null) {
           hash,
           folderId: targetFolderId,
           useEncryption,
-          encryptionSalt,
+          useDek,
         }),
         signal: controller.signal,
       });
@@ -426,31 +511,38 @@ export function useUpload(currentFolderId: string | null) {
 
       updateUpload(id, { fileId });
 
+      // Persist the file keyed by server fileId so it survives a page refresh
+      // and can be found by the dashboard's resume flow (useResume). Prefer a
+      // reopenable handle (File System Access API) when available; otherwise
+      // fall back to storing the file content itself as a Blob — IndexedDB
+      // backs large Blobs with disk rather than holding them in memory, so
+      // this works even in browsers without the File System Access API.
+      storeResumeFile(fileId, {
+        fileId,
+        handle,
+        blob: handle ? undefined : file,
+        filename: file.name,
+        size: file.size,
+        lastModified: file.lastModified,
+        storedAt: Date.now(),
+      }).catch(() => {});
+
       uploadMeta.current.set(id, {
         file,
         fileId,
         totalChunks,
         chunkSize,
         hash,
-        encryptionSalt,
-        passphrase,
       });
 
-      let cryptoKey: CryptoKey | null = null;
-      if (passphrase && encryptionSalt) {
-        const saltBuf = new Uint8Array(atob(encryptionSalt).length);
-        const binary = atob(encryptionSalt);
-        for (let i = 0; i < binary.length; i++) saltBuf[i] = binary.charCodeAt(i);
-        cryptoKey = await deriveKey(passphrase, saltBuf);
-      }
-
-      const uploadedBytes = await uploadChunks(id, file, fileId, totalChunks, chunkSize, cryptoKey, passphrase, encryptionSalt, controller, 0, new Set());
+      const uploadedBytes = await uploadChunks(id, file, fileId, totalChunks, chunkSize, dek, controller, 0, new Set());
 
       abortControllers.current.delete(id);
 
       if (cancelRef.current) {
         setUploads((prev) => prev.filter((u) => u.id !== id));
         uploadMeta.current.delete(id);
+        removeQueueItem(id).catch(() => {});
         return;
       }
 
@@ -470,6 +562,7 @@ export function useUpload(currentFolderId: string | null) {
 
       updateUpload(id, { status: "success", progress: 100 });
       uploadMeta.current.delete(id);
+      removeQueueItem(id).catch(() => {});
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     } catch (err: unknown) {
       abortControllers.current.delete(id);
@@ -477,11 +570,15 @@ export function useUpload(currentFolderId: string | null) {
       if (e.isCancelled || controller.signal.aborted) {
         setUploads((prev) => prev.filter((u) => u.id !== id));
         uploadMeta.current.delete(id);
+        removeQueueItem(id).catch(() => {});
         return;
       }
       updateUpload(id, { status: "error", error: e.message || "Upload failed" });
     }
   }, [currentFolderId, queryClient, updateUpload, uploadChunks]);
+
+  // Expose handleFile via ref so resumeSingleUpload can call it
+  handleFileRef.current = handleFile;
 
   const getFileHash = async (file: File): Promise<string> => {
     const buffer = await file.arrayBuffer();
@@ -490,14 +587,67 @@ export function useUpload(currentFolderId: string | null) {
     return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   };
 
+  const restoreQueue = useCallback(async (folderId?: string | null) => {
+    const items = await getAllQueueItems();
+    const newEntries: UploadEntry[] = [];
+
+    for (const [id, item] of items) {
+      // Skip entries already in the uploads list
+      if (uploads.some((u) => u.id === id)) continue;
+
+      let file: File | null = null;
+
+      // Try FileSystemFileHandle first
+      if (item.handle) {
+        try {
+          const opts = { mode: "read" as const };
+          if (await item.handle.queryPermission(opts) !== "granted") {
+            await item.handle.requestPermission(opts);
+          }
+          file = await item.handle.getFile();
+        } catch {
+          // handle revoked, try data
+        }
+      }
+
+      // Fall back to stored ArrayBuffer
+      if (!file && item.data) {
+        try {
+          file = new File([item.data], item.filename, { type: item.type, lastModified: item.lastModified });
+        } catch {
+          // data corrupted, skip
+        }
+      }
+
+      if (file) {
+        restoredFiles.current.set(id, file);
+        newEntries.push({
+          id,
+          filename: item.filename,
+          size: item.size,
+          status: "paused",
+          progress: 0,
+          error: "",
+          duplicateFile: null,
+        });
+      }
+    }
+
+    if (newEntries.length > 0) {
+      setUploads((prev) => [...prev, ...newEntries]);
+    }
+  }, [uploads]);
+
   return {
     uploads,
     cancelledIds,
     handleFile,
+    removeFromQueue,
     cancelUpload,
     cancelSingleUpload,
     pauseUpload,
     pauseSingleUpload,
     resumeSingleUpload,
+    restoreQueue,
   };
 }
