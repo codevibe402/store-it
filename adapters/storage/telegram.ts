@@ -33,14 +33,29 @@ export async function sendDocument(
   };
 }
 
+// Telegram guarantees a getFile download link stays valid for at least an
+// hour — caching the resolved file_path for less than that (per serverless
+// instance; this is memory-only and doesn't survive cold starts, but a warm
+// instance handling a burst of chunk requests for the same file — the
+// common case when previewing/scrubbing — skips a full API round trip per
+// chunk instead of just one) cuts one of the two network hops per chunk
+// fetch without touching correctness.
+const FILE_PATH_TTL_MS = 50 * 60 * 1000;
+const filePathCache = new Map<string, { filePath: string; fileSize: number; expiresAt: number }>();
+
 export async function getFile(fileId: string): Promise<{ filePath: string; fileSize: number }> {
+  const cached = filePathCache.get(fileId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { filePath: cached.filePath, fileSize: cached.fileSize };
+  }
+
   const res = await fetch(botUrl("getFile") + `?file_id=${encodeURIComponent(fileId)}`);
   const body = await res.json();
   if (!res.ok) throw new Error(body.description || "Telegram getFile failed");
-  return {
-    filePath: body.result.file_path,
-    fileSize: body.result.file_size,
-  };
+
+  const result = { filePath: body.result.file_path, fileSize: body.result.file_size };
+  filePathCache.set(fileId, { ...result, expiresAt: Date.now() + FILE_PATH_TTL_MS });
+  return result;
 }
 
 export function getFileDownloadUrl(filePath: string): string {
