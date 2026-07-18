@@ -16,6 +16,8 @@ export default function FoldersPage() {
     rootFolders,
     folderFileCounts,
     visibleFiles,
+    allFilteredFiles,
+    search,
     openFolder,
     goBackToRoot,
     handleFolderContextMenu,
@@ -27,6 +29,7 @@ export default function FoldersPage() {
   const reduceMotion = useReducedMotion();
 
   const drawerList = selectedFolder ? currentFolders : rootFolders;
+  const isSearching = search.trim().length > 0;
 
   return (
     <div>
@@ -69,6 +72,29 @@ export default function FoldersPage() {
             }}
           />
         </motion.div>
+      )}
+
+      {!selectedFolder && isSearching && (
+        <>
+          <div className={shared.sectionHead}>
+            <h2 className={shared.sectionTitle}>Matching &quot;{search.trim()}&quot;</h2>
+          </div>
+          {allFilteredFiles.length === 0 ? (
+            <div className={shared.emptyNote}>No files match your search.</div>
+          ) : (
+            <motion.div className={shared.fileList} initial="hidden" animate="show" variants={staggerContainer(0.04, reduceMotion)}>
+              {allFilteredFiles.map((file) => (
+                <FileCard
+                  key={file._id}
+                  file={file}
+                  onOpen={fileActions.openFile}
+                  onDownload={fileActions.downloadFile}
+                  onContextMenu={handleFileContextMenu}
+                />
+              ))}
+            </motion.div>
+          )}
+        </>
       )}
 
       {selectedFolder && (

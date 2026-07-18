@@ -16,6 +16,7 @@ export default function OverviewPage() {
     rootFolders,
     folderFileCounts,
     totalBytesUsed,
+    search,
     setActivePage,
     setShowNewFolder,
     setNewFolderName,
@@ -26,15 +27,18 @@ export default function OverviewPage() {
   } = useArchive();
   const reduceMotion = useReducedMotion();
 
-  const recentFiles = useMemo(
-    () =>
-      files
-        .filter((f) => f.status === "uploaded")
-        .slice()
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, 5),
-    [files]
-  );
+  const normalizedSearch = search.trim().toLowerCase();
+  const isSearching = normalizedSearch.length > 0;
+
+  const recentFiles = useMemo(() => {
+    const matches = files
+      .filter((f) => f.status === "uploaded")
+      .filter((f) => !normalizedSearch || f.filename.toLowerCase().includes(normalizedSearch))
+      .slice()
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return isSearching ? matches : matches.slice(0, 5);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, normalizedSearch]);
 
   const eyebrowDate = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
@@ -44,8 +48,9 @@ export default function OverviewPage() {
         <div className={shared.eyebrow}>Ledger — {eyebrowDate}</div>
         <h1 className={shared.pageTitle}>Your Archive</h1>
         <p className={shared.pageDesc}>
-          Everything you&apos;ve filed, at a glance. {rootFolders.length} drawer{rootFolders.length === 1 ? "" : "s"}, {recentFiles.length} recent entr
-          {recentFiles.length === 1 ? "y" : "ies"}.
+          {isSearching
+            ? `${recentFiles.length} file${recentFiles.length === 1 ? "" : "s"} matching "${search.trim()}".`
+            : `Everything you've filed, at a glance. ${rootFolders.length} drawer${rootFolders.length === 1 ? "" : "s"}, ${recentFiles.length} recent entr${recentFiles.length === 1 ? "y" : "ies"}.`}
         </p>
       </div>
 
@@ -101,13 +106,13 @@ export default function OverviewPage() {
       </motion.div>
 
       <div className={shared.sectionHead}>
-        <h2 className={shared.sectionTitle}>Recently filed</h2>
+        <h2 className={shared.sectionTitle}>{isSearching ? `Matching "${search.trim()}"` : "Recently filed"}</h2>
         <button type="button" className={shared.sectionLink} onClick={() => setActivePage("files")}>
           View all →
         </button>
       </div>
       {recentFiles.length === 0 ? (
-        <div className={shared.emptyNote}>Nothing filed yet.</div>
+        <div className={shared.emptyNote}>{isSearching ? "No files match your search." : "Nothing filed yet."}</div>
       ) : (
         <motion.div className={shared.fileList} initial="hidden" animate="show" variants={staggerContainer(0.04, reduceMotion)}>
           {recentFiles.map((file) => (
