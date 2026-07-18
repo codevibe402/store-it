@@ -1,0 +1,304 @@
+.page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 24px 60px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--brass);
+  margin-bottom: 18px;
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brass);
+  margin-bottom: 14px;
+}
+
+.backLink:hover {
+  color: var(--brass-bright);
+}
+
+.title {
+  font-family: var(--font-fraunces), serif;
+  font-weight: 600;
+  font-size: 30px;
+  letter-spacing: -0.3px;
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.roleBadge {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: rgba(201, 162, 39, 0.14);
+  border: 1px solid var(--line-strong);
+  color: var(--brass-bright);
+  font-family: var(--font-public-sans), sans-serif;
+}
+
+.meta {
+  font-family: var(--font-plex-mono), monospace;
+  font-size: 12px;
+  color: var(--sage);
+  margin-bottom: 30px;
+}
+
+.addPanel {
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 30px;
+}
+
+.addTitle {
+  font-family: var(--font-fraunces), serif;
+  font-style: italic;
+  font-size: 16px;
+  color: var(--brass-bright);
+}
+
+.addSub {
+  font-size: 12.5px;
+  color: var(--sage);
+  margin-top: 3px;
+}
+
+.addActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.addBtn {
+  background: rgba(201, 162, 39, 0.12);
+  border: 1px solid var(--brass);
+  color: var(--brass-bright);
+  border-radius: var(--radius);
+  padding: 9px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.addBtn:hover {
+  background: rgba(201, 162, 39, 0.2);
+}
+
+.addForm {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-width: 240px;
+}
+
+.addForm input {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--line-strong);
+  color: var(--paper);
+  border-radius: var(--radius);
+  padding: 9px 12px;
+  min-width: 0;
+  font-size: 13px;
+  outline: none;
+}
+
+.addForm input:focus {
+  border-color: var(--brass);
+}
+
+.addMessage {
+  font-size: 12.5px;
+  color: var(--brass-bright);
+}
+
+.sectionLabel {
+  font-family: var(--font-fraunces), serif;
+  font-style: italic;
+  font-size: 16px;
+  color: var(--paper);
+  margin: 0 0 12px;
+}
+
+.drawerGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 30px;
+}
+
+.drawer {
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 18px 18px 14px;
+  position: relative;
+  display: block;
+}
+
+.drawer::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 18px;
+  width: 40px;
+  height: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line-strong);
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+}
+
+.drawerIcon {
+  width: 26px;
+  height: 26px;
+  color: var(--brass);
+}
+
+.drawerName {
+  font-family: var(--font-fraunces), serif;
+  font-style: italic;
+  font-size: 16px;
+  margin: 12px 0 0;
+}
+
+.fileList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 32px;
+}
+
+.fileCard {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  position: relative;
+}
+
+.flag {
+  width: 4px;
+  align-self: stretch;
+  border-radius: 2px;
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+}
+.flag.image {
+  background: var(--rose);
+}
+.flag.video {
+  background: var(--violet);
+}
+.flag.doc {
+  background: var(--blue);
+}
+.flag.other {
+  background: var(--sage);
+}
+
+.fileIcon {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+.fileIcon svg {
+  width: 18px;
+  height: 18px;
+}
+.fileIcon.image {
+  background: rgba(201, 125, 107, 0.14);
+  color: var(--rose);
+}
+.fileIcon.doc {
+  background: rgba(110, 147, 168, 0.14);
+  color: var(--blue);
+}
+.fileIcon.video {
+  background: rgba(143, 132, 176, 0.14);
+  color: var(--violet);
+}
+.fileIcon.other {
+  background: rgba(139, 154, 147, 0.14);
+  color: var(--sage);
+}
+
+.fileMeta {
+  flex: 1;
+  min-width: 0;
+}
+
+.fileName {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--paper);
+}
+
+.fileSub {
+  font-family: var(--font-plex-mono), monospace;
+  font-size: 11.5px;
+  color: var(--sage);
+  margin-top: 3px;
+}
+
+.fileActions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.fileActions a {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--brass);
+  border-bottom: 1px solid transparent;
+}
+
+.fileActions a:hover {
+  border-bottom-color: var(--brass);
+}
+
+.footer {
+  text-align: center;
+  font-size: 12px;
+  color: var(--sage);
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+}

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Fraunces, Public_Sans, IBM_Plex_Mono } from "next/font/google";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
@@ -22,31 +21,10 @@ import TrashPage from "./TrashPage";
 import SettingsPage from "./SettingsPage";
 import { matchesFilter } from "./utils";
 import { pageTransition } from "./motionVariants";
+import { archiveFontVariables } from "./fonts";
 import type { ArchivePageId, CtxMenuTarget, FileFilter, FileType, FolderType } from "./types";
 import tokens from "./tokens.module.css";
 import styles from "./ArchiveShell.module.css";
-
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
-  style: ["normal", "italic"],
-  variable: "--font-fraunces",
-  display: "swap",
-});
-
-const publicSans = Public_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-public-sans",
-  display: "swap",
-});
-
-const plexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-plex-mono",
-  display: "swap",
-});
 
 const PAGES: Record<ArchivePageId, React.ComponentType> = {
   overview: OverviewPage,
@@ -250,7 +228,7 @@ export default function ArchiveShell() {
 
   return (
     <ArchiveContext.Provider value={value}>
-      <div className={`${tokens.archiveRoot} ${fraunces.variable} ${publicSans.variable} ${plexMono.variable}`} style={{ fontFamily: "var(--font-public-sans), sans-serif" }}>
+      <div className={`${tokens.archiveRoot} ${archiveFontVariables}`} style={{ fontFamily: "var(--font-public-sans), sans-serif" }}>
         <div className={styles.app}>
           <Sidebar />
           <main className={styles.main}>

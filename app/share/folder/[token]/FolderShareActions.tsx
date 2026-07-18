@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useState } from "react";
+import styles from "@/components/archive/ShareFolderBrowser.module.css";
 
 type Props = {
   token: string;
@@ -71,27 +72,27 @@ export default function FolderShareActions({ token, canAdd, folderId }: Props) {
   }
 
   return (
-    <div className="share-add-panel">
+    <div className={styles.addPanel}>
       <div>
-        <div className="share-add-title">Add access enabled</div>
-        <div className="share-add-sub">People with this link can upload files and create folders here.</div>
+        <div className={styles.addTitle}>Add access enabled</div>
+        <div className={styles.addSub}>People with this link can upload files and create folders here.</div>
       </div>
-      <div className="share-add-actions">
-        <label className="share-add-btn">
+      <div className={styles.addActions}>
+        <label className={styles.addBtn}>
           Upload file
           <input type="file" hidden onChange={uploadFile} disabled={busy} />
         </label>
-        <form className="share-folder-form" onSubmit={createFolder}>
+        <form className={styles.addForm} onSubmit={createFolder}>
           <input
             value={folderName}
             onChange={(event) => setFolderName(event.target.value)}
             placeholder="New folder name"
             disabled={busy}
           />
-          <button type="submit" disabled={busy}>Create</button>
+          <button type="submit" className={styles.addBtn} disabled={busy}>Create</button>
         </form>
       </div>
-      {message && <div className="share-add-message">{message}</div>}
+      {message && <div className={styles.addMessage}>{message}</div>}
     </div>
   );
 }
