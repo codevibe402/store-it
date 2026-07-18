@@ -54,11 +54,7 @@ export async function POST(req: NextRequest) {
   file.status = "uploaded";
   await file.save();
 
-  const userDoc = await User.findById(file.owner_id);
-  if (userDoc) {
-    userDoc.storageused = (userDoc.storageused || 0) + file.size;
-    await userDoc.save();
-  }
+  await User.findByIdAndUpdate(file.owner_id, { $inc: { storageused: file.size } });
 
   const version = await FileVersion.create({
     file_id: file._id,
