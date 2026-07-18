@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import { getSessionDEK } from "./useFileEncryption";
 import { fetchManifest, fetchAndDecryptFile } from "@/client/lib/decryptedDownload";
+import { getCachedPreviewBlob, storeCachedPreviewBlob } from "@/client/lib/previewCache";
 
 type FileType = {
   _id: string;
@@ -58,6 +59,15 @@ export function useFiles(files: FileType[], folders: FolderType[]) {
     const manifest = await fetchManifest(file._id);
     if (!manifest.requiresClientDecrypt) return null;
 
+    // versionId is stable per uploaded version (a new version gets a new
+    // one), so a cache hit here is guaranteed to be this exact content —
+    // skips re-fetching every chunk and re-running AES-GCM decryption on a
+    // file this device has already opened before.
+    if (manifest.versionId) {
+      const cached = await getCachedPreviewBlob(file._id, manifest.versionId);
+      if (cached) return window.URL.createObjectURL(cached.blob);
+    }
+
     const dek = getSessionDEK();
     if (!dek) {
       toast.error("This file is encrypted and this device isn't unlocked yet. Enter your recovery code to access it.");
@@ -65,6 +75,9 @@ export function useFiles(files: FileType[], folders: FolderType[]) {
     }
 
     const blob = await fetchAndDecryptFile(file._id, manifest, dek);
+    if (manifest.versionId) {
+      storeCachedPreviewBlob(file._id, manifest.versionId, blob, manifest.mimetype || "application/octet-stream");
+    }
     return window.URL.createObjectURL(blob);
   };
 
