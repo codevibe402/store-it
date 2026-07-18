@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { getAuthUser } from "@/server/auth/auth";
 import { getFileChunkData } from "@/server/services/fileService";
 import { ServiceError } from "@/server/services/shareService";
 import { getFile, getFileDownloadUrl } from "@/adapters/storage/telegram";
+import { getCachedChunk, cacheChunkBestEffort } from "@/server/lib/telegramChunkCache";
 
 export async function GET(
   req: NextRequest,
@@ -21,13 +22,28 @@ export async function GET(
 
     const chunk = await getFileChunkData(user.userId, id, versionId, chunkIndex);
 
+    const cached = await getCachedChunk(versionId, chunkIndex);
+    if (cached) {
+      return new NextResponse(new Uint8Array(cached), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Length": String(chunk.size),
+          "Cache-Control": "private, max-age=86400, immutable",
+        },
+      });
+    }
+
     const { filePath } = await getFile(chunk.telegramFileId);
     const tgRes = await fetch(getFileDownloadUrl(filePath));
     if (!tgRes.ok || !tgRes.body) {
       return NextResponse.json({ error: "Failed to fetch chunk from storage" }, { status: 502 });
     }
 
-    return new NextResponse(tgRes.body, {
+    const data = Buffer.from(await tgRes.arrayBuffer());
+    after(() => cacheChunkBestEffort(versionId, chunkIndex, data));
+
+    return new NextResponse(new Uint8Array(data), {
       status: 200,
       headers: {
         "Content-Type": "application/octet-stream",
