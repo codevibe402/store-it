@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored third-party tree (Telegram tdlib build tooling / examples) —
+    // not part of the app, was never meant to be linted against our rules.
+    "telegram-bot-api/**",
   ]),
 ]);
 
