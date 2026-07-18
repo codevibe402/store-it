@@ -27,7 +27,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     const response = NextResponse.redirect(result.url, { status: 302 });
-    response.headers.set('Cache-Control', 'public, max-age=86400');
+    response.headers.set('Cache-Control', 'private, max-age=86400');
     return response;
   } catch (err) {
     if (err instanceof ServiceError) return NextResponse.json({ error: err.message }, { status: err.status });
