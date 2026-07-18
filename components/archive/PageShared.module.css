@@ -77,8 +77,13 @@
 }
 
 .statCell {
+  /* Grid item — without this it defaults to min-width:auto (its content's
+     min-content), which can push the whole stat-strip (and page) wider
+     than the viewport. */
+  min-width: 0;
   background: var(--panel);
   padding: 22px 24px;
+  overflow: hidden;
 }
 
 .statLabel {

@@ -151,6 +151,7 @@
 }
 
 .drawer {
+  min-width: 0;
   background: var(--panel);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
@@ -183,6 +184,8 @@
   font-style: italic;
   font-size: 16px;
   margin: 12px 0 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .fileList {
@@ -196,6 +199,7 @@
   display: flex;
   align-items: center;
   gap: 16px;
+  min-width: 0;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);

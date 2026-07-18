@@ -2,6 +2,7 @@
   display: grid;
   grid-template-columns: 240px 1fr;
   min-height: 100vh;
+  min-width: 0;
 }
 
 @media (max-width: 860px) {
@@ -11,6 +12,12 @@
 }
 
 .main {
+  /* Grid items default to min-width:auto (their content's min-content
+     size), which can force this 1fr track — and the whole grid — wider
+     than the viewport when a child can't shrink (long names, wide rows).
+     min-width:0 lets it actually respect the 1fr track and rely on
+     wrapping/ellipsis/scroll-containers inside instead. */
+  min-width: 0;
   padding: 34px 44px 60px;
   max-width: 1180px;
 }

@@ -1,4 +1,8 @@
 .drawer {
+  /* Grid item in an auto-fill/minmax(200px,1fr) track — without this, an
+     unbroken long folder name forces the track (and the page) wider than
+     the viewport instead of wrapping inside the card. */
+  min-width: 0;
   background: var(--panel);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
@@ -48,6 +52,8 @@
   font-style: italic;
   font-size: 18px;
   margin: 14px 0 3px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .count {

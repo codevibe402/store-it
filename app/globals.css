@@ -321,6 +321,19 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; }
 
+/* Safety net: a stray overflowing element anywhere (e.g. an unshrinkable
+   grid/flex child) shouldn't be able to push the whole page wider than the
+   viewport and reveal a white gutter + horizontal scrollbar. Per-component
+   fixes (min-width:0 on the grid/flex children that can trigger this) are
+   the real fix — this just clips whatever slips through. --ink falls back
+   to its hex value here since the token is normally scoped to the archive
+   UI's .archiveRoot wrapper, not :root. */
+html, body {
+  background: var(--ink, #171f1b);
+  width: 100%;
+  overflow-x: hidden;
+}
+
 @layer utilities {
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
