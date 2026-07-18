@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ObjectId } from "mongodb";
 import { getAuthUser } from "@/server/auth/auth";
 import connectDB from "@/adapters/database/mongoose";
 import { s3, BUCKET } from "@/adapters/storage/s3";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import File from "@/adapters/database/models/File";
 import FileVersion from "@/adapters/database/models/FileVersion";
+import Folder from "@/adapters/database/models/Folder";
 import User from "@/adapters/database/models/User";
 import { extractSearchText } from "@/server/lib/fileText";
+import { resolveFolderPermission, atLeast } from "@/server/services/permissionService";
 
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 
@@ -67,7 +70,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    if (!user.hasEnoughStorage(size)) {
+    // Ownership (and the storage quota being spent) follows the folder's
+    // owner when uploading into a folder shared with this user — same rule
+    // server/services/folderService.ts and the telegram/init route already
+    // use, so a shared tree never ends up with mixed ownership depending on
+    // which upload path was used. Also the only place this route verifies
+    // the uploader actually has editor+ access to the target folder at all.
+    let owner = user;
+    if (normalizedFolderId) {
+      if (!ObjectId.isValid(normalizedFolderId)) {
+        return NextResponse.json({ error: "Invalid folderId" }, { status: 400 });
+      }
+      const folder = await Folder.findOne({ _id: normalizedFolderId, deleted: { $ne: true } }).lean();
+      if (!folder) {
+        return NextResponse.json({ error: "Folder not found" }, { status: 404 });
+      }
+      if (String(folder.owner_id) !== user._id.toString()) {
+        const access = await resolveFolderPermission(user._id.toString(), normalizedFolderId);
+        if (!access || !atLeast(access.role, "editor")) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
+        const folderOwner = await User.findById(folder.owner_id);
+        if (!folderOwner) {
+          return NextResponse.json({ error: "Folder owner not found" }, { status: 404 });
+        }
+        owner = folderOwner;
+      }
+    }
+
+    if (!owner.hasEnoughStorage(size)) {
       return NextResponse.json(
         { error: "Storage limit exceeded" },
         { status: 413 }
@@ -104,7 +135,7 @@ export async function POST(req: NextRequest) {
     } else {
       existingFileRecord = await File.findOne({
         hash,
-        owner_id: user._id,
+        owner_id: owner._id,
         status: "uploaded",
       });
 
@@ -118,7 +149,7 @@ export async function POST(req: NextRequest) {
 
     const key = existingFileRecord
       ? existingFileRecord.storageUrl
-      : `uploads/${user._id}/${Date.now()}-${filename}`;
+      : `uploads/${owner._id}/${Date.now()}-${filename}`;
 
     const buffer = Buffer.from(await uploadedFile.arrayBuffer());
     const searchText = await extractSearchText(buffer, filename, mimeType);
@@ -147,7 +178,7 @@ export async function POST(req: NextRequest) {
 
     const existingByName = await File.findOne({
       filename,
-      owner_id: user._id,
+      owner_id: owner._id,
       folderId: normalizedFolderId,
       status: "uploaded",
       hash: { $ne: hash },
@@ -181,7 +212,7 @@ export async function POST(req: NextRequest) {
       existingByName.currentVersionId = version._id;
       await existingByName.save();
 
-      await User.findByIdAndUpdate(user._id, { $inc: { storageused: size - oldSize } });
+      await User.findByIdAndUpdate(owner._id, { $inc: { storageused: size - oldSize } });
 
       return NextResponse.json(
         { file: existingByName, version: nextVersion, versioned: true },
@@ -192,8 +223,8 @@ export async function POST(req: NextRequest) {
     file = await File.create({
       filename,
       hash,
-      owner_email: user.email,
-      owner_id: user._id,
+      owner_email: owner.email,
+      owner_id: owner._id,
       mimetype: mimeType,
       size,
       searchText,
@@ -219,7 +250,7 @@ export async function POST(req: NextRequest) {
     file.currentVersionId = version._id;
     await file.save();
 
-    await User.findByIdAndUpdate(user._id, { $inc: { storageused: size } });
+    await User.findByIdAndUpdate(owner._id, { $inc: { storageused: size } });
 
     return NextResponse.json({ file }, { status: 201 });
   } catch (err) {
