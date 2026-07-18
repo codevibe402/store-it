@@ -1,4 +1,4 @@
-import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { s3, BUCKET } from "@/adapters/storage/s3";
 
 // Telegram chunk bytes, once fetched, rarely need fetching again — every
@@ -53,5 +53,20 @@ export async function cacheChunkBestEffort(versionId: string, chunkIndex: number
     );
   } catch (err) {
     console.warn(`[telegramChunkCache] Failed to cache chunk ${versionId}/${chunkIndex}`, err);
+  }
+}
+
+// Best-effort — never throws. Call when the underlying Telegram content is
+// gone for good (permanent file delete) so cached bytes don't outlive it as
+// an unrecoverable-via-UI, still-billed orphan. Not calling this is never
+// incorrect (the S3 lifecycle rule on this prefix cleans up regardless),
+// just slower to reclaim the space.
+export async function deleteCachedChunkBestEffort(versionId: string, chunkIndex: number): Promise<void> {
+  try {
+    await s3.send(
+      new DeleteObjectCommand({ Bucket: BUCKET, Key: cacheKey(versionId, chunkIndex) })
+    );
+  } catch (err) {
+    console.warn(`[telegramChunkCache] Failed to delete cached chunk ${versionId}/${chunkIndex}`, err);
   }
 }

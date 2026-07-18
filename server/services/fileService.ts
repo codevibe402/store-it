@@ -9,6 +9,7 @@ import TelegramChunk from "@/adapters/database/models/TelegramChunk";
 import User from "@/adapters/database/models/User";
 import { deleteMessage } from "@/adapters/storage/telegram";
 import { createS3DownloadUrl, createTelegramDownloadStream } from "@/server/lib/download";
+import { deleteCachedChunkBestEffort } from "@/server/lib/telegramChunkCache";
 import { ServiceError } from "./shareService";
 import EncryptionKeyModel from "@/adapters/database/models/EncryptionKey";
 
@@ -86,6 +87,9 @@ export async function hardDeleteFile(userId: string, fileId: string) {
     const chunks = await TelegramChunk.find({ fileId });
     for (const chunk of chunks) {
       try { await deleteMessage(chunk.telegramMessageId); } catch {}
+      if (chunk.versionId) {
+        await deleteCachedChunkBestEffort(String(chunk.versionId), chunk.chunkIndex);
+      }
     }
     await TelegramChunk.deleteMany({ fileId });
   } else {
