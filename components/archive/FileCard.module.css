@@ -1,0 +1,132 @@
+.fileCard {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  position: relative;
+  transition: border-color 0.15s ease;
+}
+
+.fileCard:hover {
+  border-color: var(--line-strong);
+}
+
+.flag {
+  width: 4px;
+  align-self: stretch;
+  border-radius: 2px;
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+}
+
+.flag.image {
+  background: var(--rose);
+}
+.flag.video {
+  background: var(--violet);
+}
+.flag.doc {
+  background: var(--blue);
+}
+.flag.other {
+  background: var(--sage);
+}
+
+.icon {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+
+.icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.icon.image {
+  background: rgba(201, 125, 107, 0.14);
+  color: var(--rose);
+}
+.icon.doc {
+  background: rgba(110, 147, 168, 0.14);
+  color: var(--blue);
+}
+.icon.video {
+  background: rgba(143, 132, 176, 0.14);
+  color: var(--violet);
+}
+.icon.other {
+  background: rgba(139, 154, 147, 0.14);
+  color: var(--sage);
+}
+
+.meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-public-sans), sans-serif;
+}
+
+.sub {
+  font-family: var(--font-plex-mono), monospace;
+  font-size: 11.5px;
+  color: var(--sage);
+  margin-top: 3px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-shrink: 0;
+}
+
+.linkBtn {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--brass);
+  border-bottom: 1px solid transparent;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  padding: 0;
+}
+
+.linkBtn:hover {
+  border-bottom-color: var(--brass);
+}
+
+.iconBtn {
+  background: none;
+  border: none;
+  color: var(--sage);
+  padding: 4px;
+  display: flex;
+}
+
+.iconBtn:hover {
+  color: var(--paper);
+}
+
+.iconBtn svg {
+  width: 16px;
+  height: 16px;
+}

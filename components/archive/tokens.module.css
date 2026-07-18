@@ -1,0 +1,40 @@
+.archiveRoot {
+  --ink: #171f1b;
+  --panel: #1d2721;
+  --panel-2: #233029;
+  --line: rgba(239, 233, 220, 0.1);
+  --line-strong: rgba(239, 233, 220, 0.18);
+  --paper: #efe9dc;
+  --paper-dim: #b9b3a2;
+  --sage: #8b9a93;
+  --brass: #c9a227;
+  --brass-bright: #e0bc46;
+  --rust: #b3562c;
+  --rose: #c97d6b;
+  --blue: #6e93a8;
+  --violet: #8f84b0;
+  --radius: 2px;
+
+  background: var(--ink);
+  color: var(--paper);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+.archiveRoot :global(a) {
+  color: inherit;
+  text-decoration: none;
+}
+
+.archiveRoot :global(button) {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.archiveRoot :global(a:focus-visible),
+.archiveRoot :global(button:focus-visible),
+.archiveRoot :global(input:focus-visible),
+.archiveRoot :global(select:focus-visible) {
+  outline: 2px solid var(--brass-bright);
+  outline-offset: 2px;
+}

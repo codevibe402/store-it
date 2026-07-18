@@ -1,0 +1,29 @@
+.wrap {
+  text-align: center;
+}
+
+.dial {
+  display: block;
+  margin: 0 auto;
+}
+
+.value {
+  font-family: var(--font-plex-mono), monospace;
+  font-size: 13px;
+  color: var(--brass-bright);
+  margin-top: 2px;
+  font-weight: 600;
+}
+
+.valueUnit {
+  color: var(--sage);
+  font-weight: 400;
+}
+
+.label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  color: var(--sage);
+  margin-top: 6px;
+}

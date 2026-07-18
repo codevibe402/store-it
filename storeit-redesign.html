@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StoreIt — Archive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#171F1B;
+    --panel:#1D2721;
+    --panel-2:#233029;
+    --line:rgba(239,233,220,0.10);
+    --line-strong:rgba(239,233,220,0.18);
+    --paper:#EFE9DC;
+    --paper-dim:#B9B3A2;
+    --sage:#8B9A93;
+    --brass:#C9A227;
+    --brass-bright:#E0BC46;
+    --rust:#B3562C;
+    --rose:#C97D6B;
+    --blue:#6E93A8;
+    --violet:#8F84B0;
+    --radius:2px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--ink);
+    color:var(--paper);
+    font-family:'Public Sans', sans-serif;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono{font-family:'IBM Plex Mono', monospace;}
+  .serif{font-family:'Fraunces', serif;}
+
+  a{color:inherit; text-decoration:none;}
+  button{font-family:inherit; cursor:pointer;}
+
+  /* ============ APP SHELL ============ */
+  .app{
+    display:grid;
+    grid-template-columns:240px 1fr;
+    min-height:100vh;
+  }
+
+  /* ============ SIDEBAR ============ */
+  .sidebar{
+    background:var(--panel);
+    border-right:1px solid var(--line);
+    padding:28px 0 20px;
+    display:flex;
+    flex-direction:column;
+    position:sticky;
+    top:0;
+    height:100vh;
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:0 22px 26px;
+    margin-bottom:6px;
+    border-bottom:1px solid var(--line);
+  }
+  .brand-mark{
+    width:34px;height:34px;
+    border-radius:50%;
+    border:1.5px solid var(--brass);
+    display:flex;align-items:center;justify-content:center;
+    font-family:'Fraunces', serif;
+    font-weight:600;
+    font-size:15px;
+    color:var(--brass-bright);
+    position:relative;
+    flex-shrink:0;
+  }
+  .brand-mark::after{
+    content:'';
+    position:absolute;
+    inset:4px;
+    border-radius:50%;
+    border:1px dotted var(--brass);
+    opacity:.5;
+  }
+  .brand-name{
+    font-family:'Fraunces', serif;
+    font-weight:600;
+    font-size:17px;
+    letter-spacing:.2px;
+  }
+  .brand-sub{
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:1.6px;
+    color:var(--sage);
+    margin-top:1px;
+  }
+
+  nav.tabs{
+    display:flex;
+    flex-direction:column;
+    margin-top:18px;
+    flex:1;
+  }
+  .tab-item{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:11px 22px 11px 20px;
+    border-left:3px solid transparent;
+    color:var(--paper-dim);
+    font-size:14px;
+    font-weight:500;
+    position:relative;
+    transition:transform .18s ease, color .15s ease, border-color .15s ease;
+    background:none;
+    border-top:none;border-right:none;border-bottom:none;
+    text-align:left;
+    width:100%;
+  }
+  .tab-item svg{
+    width:17px;height:17px;
+    flex-shrink:0;
+    opacity:.75;
+  }
+  .tab-item .count{
+    margin-left:auto;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px;
+    color:var(--sage);
+  }
+  .tab-item:hover{
+    color:var(--paper);
+    transform:translateX(3px);
+  }
+  .tab-item.active{
+    color:var(--paper);
+    border-left-color:var(--brass);
+    background:linear-gradient(90deg, rgba(201,162,39,0.10), transparent);
+    transform:translateX(4px);
+  }
+  .tab-item.active svg{opacity:1; color:var(--brass-bright);}
+
+  .sidebar-foot{
+    padding:16px 22px 0;
+    border-top:1px solid var(--line);
+    margin-top:10px;
+  }
+  .gauge-wrap{
+    text-align:center;
+    padding-top:14px;
+  }
+  .gauge-label{
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:1.4px;
+    color:var(--sage);
+    margin-top:6px;
+  }
+  .gauge-value{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:13px;
+    color:var(--brass-bright);
+    margin-top:2px;
+    font-weight:600;
+  }
+
+  /* ============ MAIN ============ */
+  .main{
+    padding:34px 44px 60px;
+    max-width:1180px;
+  }
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:20px;
+    margin-bottom:34px;
+  }
+  .search-wrap{
+    position:relative;
+    flex:1;
+    max-width:420px;
+  }
+  .search-wrap svg{
+    position:absolute;
+    left:13px; top:50%;
+    transform:translateY(-50%);
+    width:15px;height:15px;
+    color:var(--sage);
+  }
+  .search-wrap input{
+    width:100%;
+    background:var(--panel);
+    border:1px solid var(--line-strong);
+    border-radius:var(--radius);
+    padding:10px 14px 10px 36px;
+    color:var(--paper);
+    font-size:13.5px;
+    font-family:inherit;
+    outline:none;
+    transition:border-color .15s ease;
+  }
+  .search-wrap input:focus{border-color:var(--brass);}
+  .search-wrap input::placeholder{color:var(--paper-dim);}
+
+  .topbar-right{display:flex; align-items:center; gap:14px;}
+  .btn{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:10px 16px;
+    border-radius:var(--radius);
+    font-size:13px;
+    font-weight:600;
+    border:1px solid var(--line-strong);
+    background:transparent;
+    color:var(--paper);
+    transition:all .15s ease;
+  }
+  .btn svg{width:14px;height:14px;}
+  .btn:hover{border-color:var(--brass); color:var(--brass-bright);}
+  .btn:active{transform:translateY(1px);}
+  .btn-primary{
+    background:var(--brass);
+    color:#171F1B;
+    border-color:var(--brass);
+  }
+  .btn-primary:hover{background:var(--brass-bright); color:#171F1B;}
+
+  .avatar{
+    width:36px;height:36px;
+    border-radius:50%;
+    background:var(--panel-2);
+    border:1px solid var(--line-strong);
+    display:flex;align-items:center;justify-content:center;
+    font-family:'Fraunces', serif;
+    font-weight:600;
+    font-size:14px;
+    color:var(--brass-bright);
+  }
+
+  .page-head{margin-bottom:30px;}
+  .eyebrow{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:2px;
+    color:var(--brass);
+    margin-bottom:8px;
+    font-weight:600;
+  }
+  .page-title{
+    font-family:'Fraunces', serif;
+    font-weight:600;
+    font-size:34px;
+    margin:0 0 8px;
+    letter-spacing:-.3px;
+  }
+  .page-desc{
+    color:var(--sage);
+    font-size:14.5px;
+    max-width:520px;
+    line-height:1.5;
+  }
+
+  .section-head{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin:38px 0 16px;
+  }
+  .section-title{
+    font-family:'Fraunces', serif;
+    font-style:italic;
+    font-weight:500;
+    font-size:19px;
+    color:var(--paper);
+  }
+  .section-link{
+    font-size:12.5px;
+    color:var(--brass);
+    font-weight:600;
+    border-bottom:1px solid transparent;
+  }
+  .section-link:hover{border-bottom-color:var(--brass);}
+
+  /* ============ OVERVIEW: STAT STRIP ============ */
+  .stat-strip{
+    display:grid;
+    grid-template-columns:1.3fr 1fr 1fr;
+    gap:1px;
+    background:var(--line);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    overflow:hidden;
+    margin-bottom:8px;
+  }
+  .stat-cell{
+    background:var(--panel);
+    padding:22px 24px;
+  }
+  .meter-row{display:flex; align-items:center; gap:18px;}
+  .meter-num{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:28px;
+    font-weight:600;
+    color:var(--brass-bright);
+    letter-spacing:-.5px;
+  }
+  .meter-sub{font-size:12px; color:var(--sage); margin-top:2px;}
+  .stat-label{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:1.4px;
+    color:var(--sage);
+    margin-bottom:10px;
+  }
+  .stat-num{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:26px;
+    font-weight:600;
+    color:var(--paper);
+  }
+  .stat-num.rose{color:var(--rose);}
+  .stat-num.blue{color:var(--blue);}
+
+  /* ============ DRAWERS (FOLDERS) ============ */
+  .drawer-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));
+    gap:16px;
+  }
+  .drawer{
+    background:var(--panel);
+    border:1px solid var(--line-strong);
+    border-radius:var(--radius);
+    padding:20px 20px 16px;
+    position:relative;
+    transition:transform .16s ease, border-color .16s ease;
+    animation:rise .4s ease backwards;
+  }
+  .drawer:hover{transform:translateY(-3px); border-color:var(--brass);}
+  .drawer::before{
+    content:'';
+    position:absolute;
+    top:-1px; left:20px;
+    width:44px; height:8px;
+    background:var(--panel-2);
+    border:1px solid var(--line-strong);
+    border-bottom:none;
+    border-radius:3px 3px 0 0;
+  }
+  .drawer-top{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+  }
+  .drawer-icon{
+    width:30px;height:30px;
+    color:var(--brass);
+  }
+  .drawer-menu{
+    background:none;border:none;color:var(--sage);
+    padding:4px;
+  }
+  .drawer-menu:hover{color:var(--paper);}
+  .drawer-name{
+    font-family:'Fraunces', serif;
+    font-style:italic;
+    font-size:18px;
+    margin:14px 0 3px;
+  }
+  .drawer-count{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11.5px;
+    color:var(--sage);
+  }
+  .drawer.add-new{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    border-style:dashed;
+    border-color:var(--line-strong);
+    color:var(--sage);
+    min-height:118px;
+    gap:8px;
+  }
+  .drawer.add-new:hover{border-color:var(--brass); color:var(--brass-bright);}
+  .drawer.add-new svg{width:22px;height:22px;}
+  .drawer.add-new span{font-size:12.5px; font-weight:600;}
+
+  /* ============ FILE CARDS ============ */
+  .file-list{display:flex; flex-direction:column; gap:10px;}
+  .file-card{
+    display:flex;
+    align-items:center;
+    gap:16px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:14px 18px;
+    position:relative;
+    transition:border-color .15s ease, transform .15s ease;
+    animation:rise .4s ease backwards;
+  }
+  .file-card:hover{border-color:var(--line-strong); transform:translateX(2px);}
+  .file-flag{
+    width:4px;
+    align-self:stretch;
+    border-radius:2px;
+    position:absolute;
+    left:0; top:8px; bottom:8px;
+  }
+  .file-icon{
+    width:38px;height:38px;
+    border-radius:var(--radius);
+    display:flex;align-items:center;justify-content:center;
+    flex-shrink:0;
+    margin-left:6px;
+  }
+  .file-icon svg{width:18px;height:18px;}
+  .file-icon.image{background:rgba(201,125,107,.14); color:var(--rose);}
+  .file-icon.doc{background:rgba(110,147,168,.14); color:var(--blue);}
+  .file-icon.video{background:rgba(143,132,176,.14); color:var(--violet);}
+
+  .file-meta{flex:1; min-width:0;}
+  .file-name{
+    font-size:14px;
+    font-weight:600;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .file-sub{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11.5px;
+    color:var(--sage);
+    margin-top:3px;
+  }
+  .file-actions{
+    display:flex;
+    align-items:center;
+    gap:18px;
+    flex-shrink:0;
+  }
+  .file-actions .link-btn{
+    font-size:12.5px;
+    font-weight:600;
+    color:var(--brass);
+    border-bottom:1px solid transparent;
+  }
+  .file-actions .link-btn:hover{border-bottom-color:var(--brass);}
+  .file-actions .icon-btn{
+    background:none;border:none;color:var(--sage);
+    padding:4px;
+    display:flex;
+  }
+  .file-actions .icon-btn:hover{color:var(--paper);}
+  .file-actions .icon-btn svg{width:16px;height:16px;}
+
+  .filter-chips{display:flex; gap:8px; margin-bottom:22px;}
+  .chip{
+    padding:7px 14px;
+    border-radius:20px;
+    border:1px solid var(--line-strong);
+    font-size:12.5px;
+    font-weight:600;
+    color:var(--sage);
+    background:transparent;
+  }
+  .chip.active{background:var(--brass); color:#171F1B; border-color:var(--brass);}
+  .chip:not(.active):hover{color:var(--paper); border-color:var(--paper-dim);}
+
+  /* ============ EMPTY STATES ============ */
+  .empty-state{
+    text-align:center;
+    padding:70px 20px 60px;
+    border:1px dashed var(--line-strong);
+    border-radius:var(--radius);
+  }
+  .empty-state svg{width:56px;height:56px; color:var(--sage); margin-bottom:18px;}
+  .empty-title{
+    font-family:'Fraunces', serif;
+    font-style:italic;
+    font-size:20px;
+    margin-bottom:8px;
+  }
+  .empty-desc{color:var(--sage); font-size:13.5px; max-width:340px; margin:0 auto;}
+
+  /* ============ SETTINGS ============ */
+  .settings-block{
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    margin-bottom:18px;
+    overflow:hidden;
+  }
+  .settings-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:18px 22px;
+    border-bottom:1px solid var(--line);
+  }
+  .settings-row:last-child{border-bottom:none;}
+  .settings-row-label{font-size:14px; font-weight:600;}
+  .settings-row-desc{font-size:12.5px; color:var(--sage); margin-top:2px;}
+  .danger-zone{border-color:rgba(179,86,44,0.35);}
+  .danger-zone .settings-row-label{color:var(--rust);}
+
+  /* ============ PAGES ============ */
+  .page{display:none;}
+  .page.active{display:block; animation:fadeIn .3s ease;}
+
+  @keyframes fadeIn{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:translateY(0);}}
+  @keyframes rise{from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);}}
+
+  .file-card:nth-child(1),.drawer:nth-child(1){animation-delay:.02s;}
+  .file-card:nth-child(2),.drawer:nth-child(2){animation-delay:.07s;}
+  .file-card:nth-child(3),.drawer:nth-child(3){animation-delay:.12s;}
+  .file-card:nth-child(4),.drawer:nth-child(4){animation-delay:.17s;}
+  .file-card:nth-child(5){animation-delay:.22s;}
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none !important; transition:none !important;}
+  }
+
+  @media (max-width:860px){
+    .app{grid-template-columns:74px 1fr;}
+    .brand-name,.brand-sub,.tab-item span:not(.count),.gauge-wrap .gauge-label,.sidebar-foot{display:none;}
+    .brand{justify-content:center; padding:0 0 20px;}
+    .tab-item{justify-content:center; padding:13px 0;}
+    .main{padding:26px 20px 50px;}
+    .stat-strip{grid-template-columns:1fr;}
+  }
+
+  /* focus visibility */
+  a:focus-visible, button:focus-visible, input:focus-visible{
+    outline:2px solid var(--brass-bright);
+    outline-offset:2px;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">S</div>
+      <div>
+        <div class="brand-name">StoreIt</div>
+        <div class="brand-sub">Personal Archive</div>
+      </div>
+    </div>
+
+    <nav class="tabs">
+      <button class="tab-item active" data-page="overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <span>Overview</span>
+      </button>
+      <button class="tab-item" data-page="files">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
+        <span>Files</span>
+        <span class="count">3</span>
+      </button>
+      <button class="tab-item" data-page="folders">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span>Folders</span>
+        <span class="count">2</span>
+      </button>
+      <button class="tab-item" data-page="shared">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>
+        <span>Shared</span>
+      </button>
+      <button class="tab-item" data-page="trash">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6h12z"/></svg>
+        <span>Trash</span>
+      </button>
+      <button class="tab-item" data-page="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.13.36.4.66.75.83.14.07.29.12.45.15H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Settings</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="gauge-wrap">
+        <svg width="120" height="70" viewBox="0 0 120 70">
+          <path d="M10,65 A50,50 0 0,1 110,65" fill="none" stroke="var(--line-strong)" stroke-width="8" stroke-linecap="round"/>
+          <path d="M10,65 A50,50 0 0,1 110,65" fill="none" stroke="var(--brass)" stroke-width="8" stroke-linecap="round" stroke-dasharray="157" stroke-dashoffset="91"/>
+          <g stroke="var(--sage)" stroke-width="1">
+            <line x1="10" y1="65" x2="14" y2="58"/>
+            <line x1="26" y1="33" x2="30" y2="38"/>
+            <line x1="60" y1="15" x2="60" y2="21"/>
+            <line x1="94" y1="33" x2="90" y2="38"/>
+            <line x1="110" y1="65" x2="106" y2="58"/>
+          </g>
+        </svg>
+        <div class="gauge-value">42.3 <span style="color:var(--sage); font-weight:400;">/ 100 GB</span></div>
+        <div class="gauge-label">Storage Used</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+
+    <div class="topbar">
+      <div class="search-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" placeholder="Search the archive…">
+      </div>
+      <div class="topbar-right">
+        <button class="btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          New Folder
+        </button>
+        <button class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          Upload
+        </button>
+        <div class="avatar">S</div>
+      </div>
+    </div>
+
+    <!-- ===== OVERVIEW PAGE ===== -->
+    <section class="page active" id="page-overview">
+      <div class="page-head">
+        <div class="eyebrow">Ledger — Jul 18</div>
+        <h1 class="page-title">Your Archive</h1>
+        <p class="page-desc">Everything you've filed, at a glance. Two drawers, three fresh entries this week.</p>
+      </div>
+
+      <div class="stat-strip">
+        <div class="stat-cell">
+          <div class="stat-label">Storage Used</div>
+          <div class="meter-row">
+            <div>
+              <div class="meter-num">42.3<span style="font-size:14px;color:var(--sage);"> GB</span></div>
+              <div class="meter-sub">of 100 GB capacity</div>
+            </div>
+          </div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-label">Total Files</div>
+          <div class="stat-num">3</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-label">Folders</div>
+          <div class="stat-num blue">2</div>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <h2 class="section-title">Your drawers</h2>
+        <a class="section-link" data-page="folders">Open all folders →</a>
+      </div>
+      <div class="drawer-grid">
+        <div class="drawer">
+          <div class="drawer-top">
+            <svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            <button class="drawer-menu">⋮</button>
+          </div>
+          <div class="drawer-name">pok</div>
+          <div class="drawer-count">0 files · empty drawer</div>
+        </div>
+        <div class="drawer">
+          <div class="drawer-top">
+            <svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            <button class="drawer-menu">⋮</button>
+          </div>
+          <div class="drawer-name">yt</div>
+          <div class="drawer-count">1 file · 22.2 MB</div>
+        </div>
+        <div class="drawer add-new">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 5v14M5 12h14"/></svg>
+          <span>New Drawer</span>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <h2 class="section-title">Recently filed</h2>
+        <a class="section-link" data-page="files">View all →</a>
+      </div>
+      <div class="file-list">
+        <div class="file-card">
+          <div class="file-flag" style="background:var(--rose);"></div>
+          <div class="file-icon image">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+          </div>
+          <div class="file-meta">
+            <div class="file-name">IMG_20260208_205539.jpg</div>
+            <div class="file-sub">2.5 MB · Filed Jul 17</div>
+          </div>
+          <div class="file-actions">
+            <a class="link-btn">Preview</a>
+            <a class="link-btn">Download</a>
+            <button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+          </div>
+        </div>
+        <div class="file-card">
+          <div class="file-flag" style="background:var(--blue);"></div>
+          <div class="file-icon doc">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
+          </div>
+          <div class="file-meta">
+            <div class="file-name">3_Property-Return-Form-2019.doc</div>
+            <div class="file-sub">68.5 KB · Filed Jul 17</div>
+          </div>
+          <div class="file-actions">
+            <a class="link-btn">Preview</a>
+            <a class="link-btn">Download</a>
+            <button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+          </div>
+        </div>
+        <div class="file-card">
+          <div class="file-flag" style="background:var(--violet);"></div>
+          <div class="file-icon video">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="m22 8-5 4 5 4z"/></svg>
+          </div>
+          <div class="file-meta">
+            <div class="file-name">Your Life as Every Type of Personality Disorder.mp4</div>
+            <div class="file-sub">22.2 MB · Filed Jul 17</div>
+          </div>
+          <div class="file-actions">
+            <a class="link-btn">Preview</a>
+            <a class="link-btn">Download</a>
+            <button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== FILES PAGE ===== -->
+    <section class="page" id="page-files">
+      <div class="page-head">
+        <div class="eyebrow">Index</div>
+        <h1 class="page-title">All Files</h1>
+        <p class="page-desc">Every card in the catalog, sorted by the day it was filed.</p>
+      </div>
+
+      <div class="filter-chips">
+        <button class="chip active">All · 3</button>
+        <button class="chip">Images · 1</button>
+        <button class="chip">Documents · 1</button>
+        <button class="chip">Video · 1</button>
+      </div>
+
+      <div class="file-list">
+        <div class="file-card">
+          <div class="file-flag" style="background:var(--rose);"></div>
+          <div class="file-icon image">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+          </div>
+          <div class="file-meta">
+            <div class="file-name">IMG_20260208_205539.jpg</div>
+            <div class="file-sub">2.5 MB · Filed Jul 17</div>
+          </div>
+          <div class="file-actions">
+            <a class="link-btn">Preview</a>
+            <a class="link-btn">Download</a>
+            <button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+          </div>
+        </div>
+        <div class="file-card">
+          <div class="file-flag" style="background:var(--blue);"></div>
+          <div class="file-icon doc">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
+          </div>
+          <div class="file-meta">
+            <div class="file-name">3_Property-Return-Form-2019.doc</div>
+            <div class="file-sub">68.5 KB · Filed Jul 17</div>
+          </div>
+          <div class="file-actions">
+            <a class="link-btn">Preview</a>
+            <a class="link-btn">Download</a>
+            <button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+          </div>
+        </div>
+        <div class="file-card">
+          <div class="file-flag" style="background:var(--violet);"></div>
+          <div class="file-icon video">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="m22 8-5 4 5 4z"/></svg>
+          </div>
+          <div class="file-meta">
+            <div class="file-name">Your Life as Every Type of Personality Disorder.mp4</div>
+            <div class="file-sub">22.2 MB · Filed Jul 17</div>
+          </div>
+          <div class="file-actions">
+            <a class="link-btn">Preview</a>
+            <a class="link-btn">Download</a>
+            <button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== FOLDERS PAGE ===== -->
+    <section class="page" id="page-folders">
+      <div class="page-head">
+        <div class="eyebrow">Cabinet</div>
+        <h1 class="page-title">Folders</h1>
+        <p class="page-desc">Pull open a drawer to see what's filed inside.</p>
+      </div>
+      <div class="drawer-grid">
+        <div class="drawer">
+          <div class="drawer-top">
+            <svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            <button class="drawer-menu">⋮</button>
+          </div>
+          <div class="drawer-name">pok</div>
+          <div class="drawer-count">0 files · empty drawer</div>
+        </div>
+        <div class="drawer">
+          <div class="drawer-top">
+            <svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            <button class="drawer-menu">⋮</button>
+          </div>
+          <div class="drawer-name">yt</div>
+          <div class="drawer-count">1 file · 22.2 MB</div>
+        </div>
+        <div class="drawer add-new">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 5v14M5 12h14"/></svg>
+          <span>New Drawer</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== SHARED PAGE ===== -->
+    <section class="page" id="page-shared">
+      <div class="page-head">
+        <div class="eyebrow">Correspondence</div>
+        <h1 class="page-title">Shared with you</h1>
+        <p class="page-desc">Files other people have sent to your archive.</p>
+      </div>
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m3 6 9 6 9-6"/></svg>
+        <div class="empty-title">Nothing's arrived yet</div>
+        <div class="empty-desc">When someone shares a file with you, it'll be stamped and filed here.</div>
+      </div>
+    </section>
+
+    <!-- ===== TRASH PAGE ===== -->
+    <section class="page" id="page-trash">
+      <div class="page-head">
+        <div class="eyebrow">Discard tray</div>
+        <h1 class="page-title">Trash</h1>
+        <p class="page-desc">Deleted files sit here for 30 days before they're shredded for good.</p>
+      </div>
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6h12z"/></svg>
+        <div class="empty-title">The tray is empty</div>
+        <div class="empty-desc">Delete a file from anywhere in your archive and it'll show up here first.</div>
+      </div>
+    </section>
+
+    <!-- ===== SETTINGS PAGE ===== -->
+    <section class="page" id="page-settings">
+      <div class="page-head">
+        <div class="eyebrow">Ledger office</div>
+        <h1 class="page-title">Settings</h1>
+        <p class="page-desc">Manage your account and how the archive behaves.</p>
+      </div>
+
+      <div class="settings-block">
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Profile name</div>
+            <div class="settings-row-desc">Shown on shared files and your avatar</div>
+          </div>
+          <button class="btn">Edit</button>
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Storage plan</div>
+            <div class="settings-row-desc">100 GB archive · 42.3 GB used</div>
+          </div>
+          <button class="btn">Upgrade</button>
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Auto-empty trash</div>
+            <div class="settings-row-desc">Shred discarded files after 30 days</div>
+          </div>
+          <button class="btn">Change</button>
+        </div>
+      </div>
+
+      <div class="settings-block danger-zone">
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Log out</div>
+            <div class="settings-row-desc">End your session on this device</div>
+          </div>
+          <button class="btn" style="border-color:var(--rust); color:var(--rust);">Log out</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  const tabs = document.querySelectorAll('[data-page]');
+  const pages = document.querySelectorAll('.page');
+
+  function goTo(pageId){
+    pages.forEach(p => p.classList.toggle('active', p.id === 'page-' + pageId));
+    document.querySelectorAll('.tab-item').forEach(t => t.classList.toggle('active', t.dataset.page === pageId));
+    window.scrollTo({top:0, behavior:'smooth'});
+  }
+
+  tabs.forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      goTo(el.dataset.page);
+    });
+  });
+
+  document.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+    });
+  });
+</script>
+
+</body>
+</html>

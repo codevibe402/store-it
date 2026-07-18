@@ -1,0 +1,157 @@
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  padding: 28px 0 20px;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 22px 26px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.brandMark {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px solid var(--brass);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-fraunces), serif;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--brass-bright);
+  position: relative;
+  flex-shrink: 0;
+}
+
+.brandMark::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  border: 1px dotted var(--brass);
+  opacity: 0.5;
+}
+
+.brandName {
+  font-family: var(--font-fraunces), serif;
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: 0.2px;
+}
+
+.brandSub {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.6px;
+  color: var(--sage);
+  margin-top: 1px;
+}
+
+.tabs {
+  display: flex;
+  flex-direction: column;
+  margin-top: 18px;
+  flex: 1;
+}
+
+.tabItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 22px 11px 20px;
+  border-left: 3px solid transparent;
+  color: var(--paper-dim);
+  font-size: 14px;
+  font-weight: 500;
+  position: relative;
+  background: none;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  text-align: left;
+  width: 100%;
+  font-family: var(--font-public-sans), sans-serif;
+  transition: color 0.15s ease;
+}
+
+.tabItem svg {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  opacity: 0.75;
+  position: relative;
+}
+
+.count {
+  margin-left: auto;
+  font-family: var(--font-plex-mono), monospace;
+  font-size: 11px;
+  color: var(--sage);
+  position: relative;
+}
+
+.tabItem:hover {
+  color: var(--paper);
+}
+
+.tabItem.active {
+  color: var(--paper);
+}
+
+.tabItem.active svg {
+  opacity: 1;
+  color: var(--brass-bright);
+}
+
+.activePill {
+  position: absolute;
+  inset: 0;
+  border-left: 3px solid var(--brass);
+  background: linear-gradient(90deg, rgba(201, 162, 39, 0.1), transparent);
+  z-index: 0;
+}
+
+.tabLabel {
+  position: relative;
+}
+
+.sidebarFoot {
+  padding: 16px 22px 0;
+  border-top: 1px solid var(--line);
+  margin-top: 10px;
+}
+
+.gaugeWrap {
+  padding-top: 14px;
+}
+
+@media (max-width: 860px) {
+  .sidebar {
+    align-items: center;
+  }
+  .brandName,
+  .brandSub,
+  .tabItem span:not(.count),
+  .sidebarFoot {
+    display: none;
+  }
+  .brand {
+    justify-content: center;
+    padding: 0 0 20px;
+  }
+  .tabItem {
+    justify-content: center;
+    padding: 13px 0;
+  }
+}

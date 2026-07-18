@@ -1,0 +1,105 @@
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 34px;
+  flex-wrap: wrap;
+}
+
+.searchWrap {
+  position: relative;
+  flex: 1;
+  max-width: 420px;
+  min-width: 180px;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 15px;
+  height: 15px;
+  color: var(--sage);
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 10px 14px 10px 36px;
+  color: var(--paper);
+  font-size: 13.5px;
+  font-family: var(--font-public-sans), sans-serif;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.searchInput:focus {
+  border-color: var(--brass);
+}
+
+.searchInput::placeholder {
+  color: var(--paper-dim);
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--paper);
+  font-family: var(--font-public-sans), sans-serif;
+  transition: border-color 0.15s ease, color 0.15s ease, filter 0.15s ease;
+}
+
+.btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.btn:hover {
+  border-color: var(--brass);
+  color: var(--brass-bright);
+}
+
+.btnPrimary {
+  background: var(--brass);
+  color: #171f1b;
+  border-color: var(--brass);
+}
+
+.btnPrimary:hover {
+  filter: brightness(1.08);
+  color: #171f1b;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  border: 1px solid var(--line-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-fraunces), serif;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--brass-bright);
+  flex-shrink: 0;
+}

@@ -1,0 +1,28 @@
+.emptyState {
+  text-align: center;
+  padding: 70px 20px 60px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+}
+
+.icon {
+  width: 56px;
+  height: 56px;
+  color: var(--sage);
+  margin: 0 auto 18px;
+  display: block;
+}
+
+.title {
+  font-family: var(--font-fraunces), serif;
+  font-style: italic;
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+.desc {
+  color: var(--sage);
+  font-size: 13.5px;
+  max-width: 340px;
+  margin: 0 auto;
+}

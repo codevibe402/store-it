@@ -1,0 +1,29 @@
+.app {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 100vh;
+}
+
+@media (max-width: 860px) {
+  .app {
+    grid-template-columns: 74px 1fr;
+  }
+}
+
+.main {
+  padding: 34px 44px 60px;
+  max-width: 1180px;
+}
+
+@media (max-width: 860px) {
+  .main {
+    padding: 26px 20px 50px;
+  }
+}
+
+.loadingState {
+  padding: 60px 0;
+  text-align: center;
+  color: var(--sage);
+  font-size: 14px;
+}

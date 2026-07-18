@@ -1,0 +1,75 @@
+.menu {
+  position: fixed;
+  z-index: 40;
+  width: 176px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  padding: 6px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+
+.item {
+  width: 100%;
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--paper);
+  background: none;
+  border: none;
+}
+
+.item:hover {
+  background: var(--panel-2);
+}
+
+.item.danger {
+  color: var(--rust);
+}
+
+.item.danger:hover {
+  background: rgba(179, 86, 44, 0.12);
+}
+
+.renameWrap {
+  padding: 6px 8px;
+}
+
+.renameInput {
+  width: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--paper);
+  outline: none;
+}
+
+.renameInput:focus {
+  border-color: var(--brass);
+}
+
+.renameActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.renameActions button {
+  flex: 1;
+  padding: 5px 0;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--paper-dim);
+}
+
+.renameActions .ok {
+  background: var(--brass);
+  color: #171f1b;
+  border-color: var(--brass);
+}
