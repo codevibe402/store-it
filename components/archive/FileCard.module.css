@@ -100,6 +100,9 @@
 }
 
 .linkBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--brass);
@@ -113,6 +116,16 @@
 
 .linkBtn:hover {
   border-bottom-color: var(--brass);
+}
+
+/* Icon is desktop-hidden — the text link is the established look at wider
+   widths. It only takes over (icon-only) once there's no room for both the
+   filename and two text actions side by side; see the 640px rule below. */
+.actionIcon {
+  display: none;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
 }
 
 .iconBtn {
@@ -130,4 +143,44 @@
 .iconBtn svg {
   width: 16px;
   height: 16px;
+}
+
+/* Touch targets: comfortable tap area below desktop (mouse-first) widths,
+   without changing the dense desktop look. */
+@media (max-width: 1023px) {
+  .iconBtn {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+  .linkBtn {
+    min-height: 44px;
+    padding: 0 2px;
+  }
+}
+
+/* Below this, icon + actions + flag/icon column leaves near-zero room for
+   the filename before it ellipsizes to nothing. Drop to icon-only actions,
+   same handlers, same tap targets — just no room for the label text. */
+@media (max-width: 640px) {
+  .fileCard {
+    gap: 10px;
+    padding: 12px 14px;
+  }
+  .icon {
+    margin-left: 4px;
+  }
+  .actions {
+    gap: 4px;
+  }
+  .actionIcon {
+    display: block;
+  }
+  .actionLabel {
+    display: none;
+  }
+  .linkBtn {
+    border-bottom: none;
+    padding: 0 6px;
+  }
 }

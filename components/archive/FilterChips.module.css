@@ -28,6 +28,12 @@
   border-color: var(--brass);
 }
 
+@media (max-width: 1023px) {
+  .chip {
+    padding: 11px 16px;
+  }
+}
+
 .chipBg {
   position: absolute;
   inset: -1px;

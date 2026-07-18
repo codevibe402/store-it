@@ -57,6 +57,9 @@ export default function Sidebar() {
         <div className={styles.gaugeWrap}>
           <StorageGauge totalBytes={totalBytesUsed} />
         </div>
+        <div className={styles.gaugeWrapCompact}>
+          <StorageGauge totalBytes={totalBytesUsed} compact />
+        </div>
       </div>
     </aside>
   );

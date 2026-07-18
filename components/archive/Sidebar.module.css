@@ -136,14 +136,17 @@
   padding-top: 14px;
 }
 
+.gaugeWrapCompact {
+  display: none;
+}
+
 @media (max-width: 860px) {
   .sidebar {
     align-items: center;
   }
   .brandName,
   .brandSub,
-  .tabItem span:not(.count),
-  .sidebarFoot {
+  .tabItem span:not(.count) {
     display: none;
   }
   .brand {
@@ -153,5 +156,16 @@
   .tabItem {
     justify-content: center;
     padding: 13px 0;
+  }
+  .sidebarFoot {
+    padding: 12px 0 0;
+  }
+  .gaugeWrap {
+    display: none;
+  }
+  .gaugeWrapCompact {
+    display: flex;
+    justify-content: center;
+    padding-top: 4px;
   }
 }

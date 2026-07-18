@@ -70,9 +70,24 @@
   margin-bottom: 8px;
 }
 
-@media (max-width: 860px) {
+/* Tablet: storage (the most important number) gets its own full-width row,
+   files/folders share the row below — deliberate 2-column tier instead of
+   jumping straight from 3-column to a full stack. */
+@media (max-width: 1023px) {
+  .statStrip {
+    grid-template-columns: 1fr 1fr;
+  }
+  .statStrip .statCell:first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
   .statStrip {
     grid-template-columns: 1fr;
+  }
+  .statStrip .statCell:first-child {
+    grid-column: auto;
   }
 }
 
@@ -128,6 +143,21 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 16px;
+}
+
+/* Deliberate tablet/mobile tiers instead of leaving this to auto-fill's
+   incidental behavior at in-between widths. */
+@media (max-width: 1023px) {
+  .drawerGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .drawerGrid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
 }
 
 .fileList {

@@ -41,10 +41,20 @@
   border: none;
   color: var(--sage);
   padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .menuBtn:hover {
   color: var(--paper);
+}
+
+@media (max-width: 1023px) {
+  .menuBtn {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 .name {

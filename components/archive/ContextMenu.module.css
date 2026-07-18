@@ -20,6 +20,12 @@
   border: none;
 }
 
+@media (max-width: 1023px) {
+  .item {
+    padding: 13px 12px;
+  }
+}
+
 .item:hover {
   background: var(--panel-2);
 }

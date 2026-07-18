@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, useReducedMotion } from "framer-motion";
-import { File, FileText, Image as ImageIcon, MoreHorizontal, Video } from "lucide-react";
+import { Download, Eye, File, FileText, Image as ImageIcon, MoreHorizontal, Video } from "lucide-react";
 import { fileKind, formatBytes, formatDate } from "./utils";
 import { riseItem } from "./motionVariants";
 import type { FileType } from "./types";
@@ -30,6 +30,7 @@ export default function FileCard({ file, onOpen, onDownload, onContextMenu }: Fi
       className={styles.fileCard}
       variants={riseItem(reduceMotion)}
       whileHover={reduceMotion ? undefined : { x: 3 }}
+      whileTap={reduceMotion ? undefined : { scale: 0.99 }}
       transition={{ duration: 0.15 }}
       onContextMenu={(e) => onContextMenu(e, file)}
     >
@@ -44,11 +45,13 @@ export default function FileCard({ file, onOpen, onDownload, onContextMenu }: Fi
         </div>
       </div>
       <div className={styles.actions}>
-        <button type="button" className={styles.linkBtn} onClick={() => onOpen(file)}>
-          Preview
+        <button type="button" className={styles.linkBtn} onClick={() => onOpen(file)} aria-label={`Preview ${file.filename}`}>
+          <Eye className={styles.actionIcon} />
+          <span className={styles.actionLabel}>Preview</span>
         </button>
-        <button type="button" className={styles.linkBtn} onClick={() => onDownload(file)}>
-          Download
+        <button type="button" className={styles.linkBtn} onClick={() => onDownload(file)} aria-label={`Download ${file.filename}`}>
+          <Download className={styles.actionIcon} />
+          <span className={styles.actionLabel}>Download</span>
         </button>
         <button
           type="button"

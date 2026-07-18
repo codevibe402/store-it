@@ -20,7 +20,7 @@ export default function SettingsPage() {
 
       <div className={styles.block}>
         <div className={styles.row}>
-          <div>
+          <div className={styles.rowText}>
             <div className={styles.rowLabel}>Profile name</div>
             <div className={styles.rowDesc}>Shown on shared files and your avatar</div>
           </div>
@@ -29,7 +29,7 @@ export default function SettingsPage() {
           </motion.button>
         </div>
         <div className={styles.row}>
-          <div>
+          <div className={styles.rowText}>
             <div className={styles.rowLabel}>Storage plan</div>
             <div className={styles.rowDesc}>{formatBytes(totalBytesUsed)} filed · no plan limit set</div>
           </div>
@@ -38,7 +38,7 @@ export default function SettingsPage() {
           </motion.button>
         </div>
         <div className={styles.row}>
-          <div>
+          <div className={styles.rowText}>
             <div className={styles.rowLabel}>Auto-empty trash</div>
             <div className={styles.rowDesc}>Shred discarded files after 30 days</div>
           </div>
@@ -50,7 +50,7 @@ export default function SettingsPage() {
 
       <div className={`${styles.block} ${styles.dangerZone}`}>
         <div className={styles.row}>
-          <div>
+          <div className={styles.rowText}>
             <div className={styles.rowLabel}>Log out</div>
             <div className={styles.rowDesc}>End your session on this device</div>
           </div>
