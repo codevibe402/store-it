@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
@@ -16,7 +16,7 @@ type UploadPanelProps = {
   currentFolderId?: string | null;
 };
 
-export default function UploadPanel({ currentFolderId = null }: UploadPanelProps) {
+function UploadPanel({ currentFolderId = null }: UploadPanelProps) {
   const { status: sessionStatus } = useSession();
   const isAuthenticated = sessionStatus === "authenticated";
 
@@ -262,6 +262,16 @@ export default function UploadPanel({ currentFolderId = null }: UploadPanelProps
     </div>
   );
 }
+
+// Upload state must survive whatever else the archive UI is doing — search,
+// sort, filter, context menus — none of that touches currentFolderId, the
+// only prop this takes. Without memo, every keystroke in search re-renders
+// FilesPage/FoldersPage (via the shared ArchiveContext value changing
+// identity), which re-renders this and every UploadRow underneath it as a
+// side effect, competing with the upload loop's own async work for the main
+// thread. memo makes that structurally impossible: this only re-renders
+// when currentFolderId itself changes.
+export default memo(UploadPanel);
 
 function UploadRow({
   entry,
