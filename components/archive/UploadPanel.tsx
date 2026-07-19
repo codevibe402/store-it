@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
@@ -29,6 +29,13 @@ function UploadPanel({ currentFolderId = null }: UploadPanelProps) {
   const uploadHook = useUpload(currentFolderIdState);
   const resumeHook = useResume();
 
+  // uploadHook.cancelledIds is a plain ref (shared with useUpload's own
+  // internals), so mutating it doesn't itself trigger a re-render — without
+  // this, dismissing a pending-upload row wouldn't visibly disappear until
+  // some unrelated re-render happened to occur (e.g. the next 15s dashboard
+  // refetch), instead of instantly.
+  const [, forceRerender] = useReducer((n) => n + 1, 0);
+
   const { data: dashboard } = useQuery<{ pendingFiles: FileType[] }>({
     queryKey: ["dashboard"],
     queryFn: async () => {
@@ -42,6 +49,49 @@ function UploadPanel({ currentFolderId = null }: UploadPanelProps) {
 
   const pendingFiles = dashboard?.pendingFiles ?? [];
   const visiblePendingFiles = pendingFiles.filter((f) => !uploadHook.cancelledIds.current.has(f._id));
+
+  // Dismisses every finished/stalled row across all three lists in one shot:
+  // completed entries in the active upload list, finished "Resuming"
+  // attempts, and untouched pending uploads — the last of which are also
+  // cancelled server-side (one batched request) so they don't just hide
+  // client-side and then reappear on the next dashboard refetch.
+  const dismissAll = useCallback(async () => {
+    for (const u of uploadHook.uploads) {
+      if (u.status === "success" || u.status === "error" || u.status === "duplicate") {
+        uploadHook.cancelSingleUpload(u.id);
+        removeQueueItem(u.id).catch(() => {});
+      }
+    }
+
+    for (const re of resumeHook.resumeEntries) {
+      if (re.status === "success" || re.status === "error") {
+        uploadHook.cancelledIds.current.add(re.fileId);
+        resumeHook.dismissEntry(re.fileId);
+      }
+    }
+
+    const dismissablePending = visiblePendingFiles.filter(
+      (f) => !resumeHook.resumeEntries.find((re) => re.fileId === f._id)
+    );
+    if (dismissablePending.length > 0) {
+      for (const f of dismissablePending) uploadHook.cancelledIds.current.add(f._id);
+      forceRerender();
+      try {
+        await fetch("/api/files/telegram/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileIds: dismissablePending.map((f) => f._id) }),
+        });
+      } catch {}
+    } else {
+      forceRerender();
+    }
+  }, [uploadHook, resumeHook, visiblePendingFiles]);
+
+  const hasDismissableItems =
+    uploadHook.uploads.some((u) => u.status === "success" || u.status === "error" || u.status === "duplicate") ||
+    resumeHook.resumeEntries.some((re) => re.status === "success" || re.status === "error") ||
+    visiblePendingFiles.length > 0;
 
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -134,6 +184,14 @@ function UploadPanel({ currentFolderId = null }: UploadPanelProps) {
         </div>
       </div>
 
+      {hasDismissableItems && (
+        <div className={styles.queueActions}>
+          <button type="button" onClick={dismissAll}>
+            Dismiss all
+          </button>
+        </div>
+      )}
+
       {uploadHook.uploads.length > 0 && (
         <div>
           <div className={styles.queueTitle}>Uploads ({uploadHook.uploads.length})</div>
@@ -203,7 +261,18 @@ function UploadPanel({ currentFolderId = null }: UploadPanelProps) {
                         </button>
                       )}
                       {(re.status === "success" || re.status === "error") && (
-                        <button type="button" onClick={() => uploadHook.cancelledIds.current.add(re.fileId)}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Both halves matter: dismissEntry removes this row from
+                            // the "Resuming" list; cancelledIds keeps the same file
+                            // from popping back up in "Pending uploads" right after
+                            // (it's excluded from that list only while it has a
+                            // tracked resume entry).
+                            uploadHook.cancelledIds.current.add(re.fileId);
+                            resumeHook.dismissEntry(re.fileId);
+                          }}
+                        >
                           Dismiss
                         </button>
                       )}
@@ -243,11 +312,14 @@ function UploadPanel({ currentFolderId = null }: UploadPanelProps) {
                         className={styles.danger}
                         onClick={async () => {
                           uploadHook.cancelledIds.current.add(file._id);
-                          await fetch("/api/files/telegram/cancel", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ fileId: file._id }),
-                          });
+                          forceRerender();
+                          try {
+                            await fetch("/api/files/telegram/cancel", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ fileId: file._id }),
+                            });
+                          } catch {}
                         }}
                       >
                         Dismiss

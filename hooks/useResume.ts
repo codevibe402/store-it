@@ -260,5 +260,10 @@ export function useResume() {
     startResume,
     cancelResume,
     pauseSingleResume,
+    // Removes a finished (success/error) entry from the list — used by the
+    // per-row and "dismiss all" Dismiss actions. Distinct from cancelResume:
+    // this doesn't touch the server, it's just clearing a client-side
+    // notification for an attempt that already reached a terminal state.
+    dismissEntry: removeEntry,
   };
 }
