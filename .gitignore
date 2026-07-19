@@ -64,3 +64,7 @@ telegram-bot-api/
 
 # misc root files
 telegramcontext.ts
+
+# internal working docs (not meant to be version-controlled)
+HANDOFF.md
+PROJECT_DESCRIPTION.md

@@ -39,6 +39,11 @@ export function TelegramLoginButton() {
         redirect: false,
       })
       if (result?.ok) {
+        // Explicit continuation of this sign-in, same pattern as
+        // credentials login (Authform.tsx) — AuthProvider's ambient
+        // bootstrap only refreshes an *existing* app session, it never
+        // mints one from NextAuth session state on its own.
+        await fetch("/api/auth/exchange", { method: "POST" })
         router.push("/dashboard")
       }
     }

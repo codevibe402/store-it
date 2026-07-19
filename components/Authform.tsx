@@ -29,6 +29,7 @@ import {
 import { Input } from "./ui/input"
 import { sanitizeEmail, sanitizeUsername, sanitizePassword } from "@/shared/security"
 import { TelegramLoginButton } from "./TelegramLoginButton"
+import { useAuth } from "./AuthProvider"
 
 type FormType = "sign-up" | "sign-in"
 
@@ -51,7 +52,10 @@ const signUpSchema = z.object({
 
 const Authform = () => {
     const router = useRouter()
+  const { isAuthenticated, requestDekRecovery } = useAuth()
   const [type, setType] = React.useState<FormType>("sign-in")
+  const [showForgotPassword, setShowForgotPassword] = React.useState(false)
+  const [recoveryArmed, setRecoveryArmed] = React.useState(false)
 
   const schema = type === "sign-up" ? signUpSchema : signInSchema
 
@@ -124,6 +128,16 @@ async function onSubmit(data: FormValues) {
   const handleTypeSwitch = (newType: FormType) => {
   setType(newType)
 }
+
+  const handleRecoverFiles = () => {
+    requestDekRecovery()
+    setRecoveryArmed(true)
+    if (isAuthenticated) {
+      toast.success("Opening the recovery prompt…")
+    } else {
+      toast.success("Got it — sign in normally, and we'll ask for your recovery code right after.")
+    }
+  }
 
   return (
     <Card className="w-full sm:max-w-md">
@@ -246,13 +260,51 @@ async function onSubmit(data: FormValues) {
           type="button"
           variant="secondary"
           className="w-full"
-          onClick={() => signIn("google", { callbackUrl: `${window.location.origin}/dashboard` })}
+          onClick={() => signIn("google", { callbackUrl: `${window.location.origin}/dashboard?authExchange=1` })}
         >
           Sign In with Google
         </Button>
         <div className="flex justify-center">
           <TelegramLoginButton />
         </div>
+
+        {type === "sign-in" && (
+          <div className="w-full border-t pt-3">
+            <button
+              type="button"
+              onClick={() => setShowForgotPassword((v) => !v)}
+              className="w-full text-center text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              Forgot password?
+            </button>
+            {showForgotPassword && (
+              <div className="mt-3 rounded-lg border bg-muted/40 p-3 text-xs">
+                {recoveryArmed ? (
+                  <p className="text-muted-foreground">
+                    {isAuthenticated
+                      ? "Check for the recovery prompt now."
+                      : "Sign in above — we'll ask for your recovery code right after."}
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-muted-foreground">
+                      Resetting your password doesn&apos;t affect encrypted files — those are
+                      unlocked separately, with the recovery code you saved when encryption was
+                      first set up.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleRecoverFiles}
+                      className="mt-2 w-full rounded-md border bg-background py-1.5 font-medium hover:bg-accent"
+                    >
+                      I have my recovery code — unlock my encrypted files
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </CardFooter>
     </Card>
   )
