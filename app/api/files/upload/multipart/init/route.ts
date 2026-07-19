@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
       owner_id: user._id,
       status: "s3_pending",
       backend: "s3",
+      deleted: { $ne: true },
     });
     if (!existingFileRecord) {
       return NextResponse.json(
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Storage limit exceeded" }, { status: 413 });
     }
 
-    existingFileRecord = await File.findOne({ hash, owner_id: user._id, status: "uploaded" });
+    existingFileRecord = await File.findOne({ hash, owner_id: user._id, status: "uploaded", deleted: { $ne: true } });
     if (existingFileRecord) {
       return NextResponse.json(
         { error: "Duplicate file", existingFile: existingFileRecord },

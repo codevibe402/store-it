@@ -127,7 +127,10 @@ export async function createTelegramDownloadStream(
     status: 200,
     headers: {
       "Content-Type": mimetype || "application/octet-stream",
-      "Content-Disposition": `${disposition}; filename="${filename}"`,
+      // filename is the user-supplied original upload name — a raw quote in
+      // it breaks out of the quoted filename="..." parameter. Percent-encode
+      // it, matching createS3DownloadUrl/createS3PresignedUrl above.
+      "Content-Disposition": `${disposition}; filename="${encodeURIComponent(filename)}"`,
       "Content-Length": totalSize.toString(),
       // Content per version is immutable once uploaded, so it's safe to cache
       // hard. `private` (not `public`) since this is an authenticated,

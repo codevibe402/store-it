@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
   const files = await File.find({
     owner_id: user.userId,
     status: "uploaded",
+    deleted: { $ne: true },
     $or: [{ filename: regex }, { searchText: regex }, { mimetype: regex }],
   })
     .select("_id filename mimetype size storageUrl folderId folders_id createdAt searchText")

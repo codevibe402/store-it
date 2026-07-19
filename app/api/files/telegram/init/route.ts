@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
       _id: fileId,
       status: { $in: ["pending", "uploading", "paused"] },
       backend: "telegram",
+      deleted: { $ne: true },
     });
 
     if (!file || !(await canUploadToFile(user._id.toString(), file))) {
@@ -118,6 +119,7 @@ export async function POST(req: NextRequest) {
       owner_id: owner._id,
       status: "uploaded",
       backend: "telegram",
+      deleted: { $ne: true },
     });
 
     if (existingFile) {

@@ -105,7 +105,7 @@ export async function uploadToSharedFolder(token: string, targetFolderId: string
   let resolvedFilename = filename;
   let conflict = true;
   for (let attempt = 1; conflict; attempt++) {
-    const existing = await File.findOne({ filename: resolvedFilename, folderId: access.folderId, owner_id: user._id, status: "uploaded" }).lean();
+    const existing = await File.findOne({ filename: resolvedFilename, folderId: access.folderId, owner_id: user._id, status: "uploaded", deleted: { $ne: true } }).lean();
     if (!existing) {
       conflict = false;
     } else {

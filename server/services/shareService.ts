@@ -36,7 +36,7 @@ export async function createFileShare(userId: string, fileId: string) {
   await connectDB();
   const now = new Date();
 
-  const file = await File.findOne({ _id: fileId, owner_id: userId, status: "uploaded" }).lean();
+  const file = await File.findOne({ _id: fileId, owner_id: userId, status: "uploaded", deleted: { $ne: true } }).lean();
   if (!file) throw new ServiceError("File not found", 404);
 
   const minRemaining = new Date(now.getTime() + 30 * 60 * 1000);
@@ -83,7 +83,10 @@ export async function getSharedFileByToken(token: string, versionId?: string | n
     return { kind: "redirect" as const, url: share.shareUrl as string };
   }
 
-  const file = await File.findOne({ _id: share.fileId, status: "uploaded" }).lean();
+  // deleted: excluded so moving a file to the recycle bin immediately
+  // revokes any outstanding share link to it too, instead of leaving it
+  // downloadable by anyone with the link until the share row itself expires.
+  const file = await File.findOne({ _id: share.fileId, status: "uploaded", deleted: { $ne: true } }).lean();
   if (!file) throw new ServiceError("File not found", 404);
 
   let version;

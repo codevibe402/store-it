@@ -36,14 +36,17 @@ export async function POST(req: NextRequest) {
 
   const file = await File.findById(fileId);
   if (!file) {
+    console.warn(`[POST /api/files/fallback-to-s3/init] file ${fileId} not found`);
     return NextResponse.json({ error: "File not found" }, { status: 404 });
   }
 
   if (file.owner_email !== user.email) {
+    console.warn(`[POST /api/files/fallback-to-s3/init] forbidden: ${user.email} does not own file ${fileId}`);
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   if (!user.hasEnoughStorage(size)) {
+    console.warn(`[POST /api/files/fallback-to-s3/init] storage limit exceeded for user ${user._id} (file ${fileId}, size ${size})`);
     return NextResponse.json({ error: "Storage limit exceeded" }, { status: 413 });
   }
 
@@ -51,8 +54,10 @@ export async function POST(req: NextRequest) {
     hash,
     owner_id: user._id,
     status: "uploaded",
+    deleted: { $ne: true },
   });
   if (existingUpload) {
+    console.warn(`[POST /api/files/fallback-to-s3/init] aborted: duplicate of already-uploaded file ${existingUpload._id}`);
     return NextResponse.json(
       { error: "Duplicate file", existingFile: existingUpload },
       { status: 409 },
@@ -61,15 +66,22 @@ export async function POST(req: NextRequest) {
 
   const key = file.storageUrl || `uploads/${user._id}/${Date.now()}-${filename}`;
 
-  const { UploadId } = await s3.send(
-    new CreateMultipartUploadCommand({
-      Bucket: BUCKET,
-      Key: key,
-      ContentType: mimeType,
-    })
-  );
+  let UploadId: string | undefined;
+  try {
+    ({ UploadId } = await s3.send(
+      new CreateMultipartUploadCommand({
+        Bucket: BUCKET,
+        Key: key,
+        ContentType: mimeType,
+      })
+    ));
+  } catch (err) {
+    console.error(`[POST /api/files/fallback-to-s3/init] S3 CreateMultipartUpload failed for file ${fileId} (key ${key})`, err);
+    return NextResponse.json({ error: "Failed to initiate S3 multipart upload" }, { status: 500 });
+  }
 
   if (!UploadId) {
+    console.error(`[POST /api/files/fallback-to-s3/init] S3 CreateMultipartUpload returned no UploadId for file ${fileId} (key ${key})`);
     return NextResponse.json({ error: "Failed to initiate S3 multipart upload" }, { status: 500 });
   }
 

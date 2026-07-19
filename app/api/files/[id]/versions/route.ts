@@ -29,6 +29,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
     _id: id,
     owner_id: user.userId,
     status: "uploaded",
+    deleted: { $ne: true },
   }).lean();
 
   if (!file) {
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   await connectDB();
 
-  const file = await File.findOne({ _id: id, owner_id: user.userId, status: "uploaded" }).lean();
+  const file = await File.findOne({ _id: id, owner_id: user.userId, status: "uploaded", deleted: { $ne: true } }).lean();
   if (!file) {
     return NextResponse.json({ error: "File not found" }, { status: 404 });
   }

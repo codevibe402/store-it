@@ -252,7 +252,7 @@ export async function downloadFolderAsZip(userId: string, folderId: string) {
 
   // Files belong to the tree's owner_id (see createFolder/uploadToSharedFolder),
   // not necessarily the requester — a viewer/editor downloads the owner's files.
-  const files = await File.find({ folderId, owner_id: folder.owner_id, status: "uploaded" }).lean();
+  const files = await File.find({ folderId, owner_id: folder.owner_id, status: "uploaded", deleted: { $ne: true } }).lean();
   if (files.length === 0) throw new ServiceError("Folder is empty", 400);
 
   const zip = new JSZip();

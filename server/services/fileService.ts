@@ -17,7 +17,7 @@ export async function moveFile(userId: string, fileId: string, folderId: string 
   if (!ObjectId.isValid(fileId)) throw new ServiceError("Invalid file id", 400);
   await connectDB();
 
-  const file = await File.findOne({ _id: fileId, owner_id: userId }).lean();
+  const file = await File.findOne({ _id: fileId, owner_id: userId, deleted: { $ne: true } }).lean();
   if (!file) throw new ServiceError("File not found", 404);
 
   if (folderId !== null) {
@@ -37,7 +37,7 @@ export async function renameFile(userId: string, fileId: string, body: { filenam
   if (!ObjectId.isValid(fileId)) throw new ServiceError("Invalid file id", 400);
   await connectDB();
 
-  const file = await File.findOne({ _id: fileId, owner_id: userId }).lean();
+  const file = await File.findOne({ _id: fileId, owner_id: userId, deleted: { $ne: true } }).lean();
   if (!file) throw new ServiceError("File not found", 404);
 
   const update: Record<string, unknown> = { updatedAt: new Date() };
@@ -69,7 +69,7 @@ export async function deleteFile(userId: string, fileId: string) {
   if (!ObjectId.isValid(fileId)) throw new ServiceError("Invalid file id", 400);
   await connectDB();
 
-  const file = await File.findOne({ _id: fileId, owner_id: userId }).lean();
+  const file = await File.findOne({ _id: fileId, owner_id: userId, deleted: { $ne: true } }).lean();
   if (!file) throw new ServiceError("File not found", 404);
 
   await File.findByIdAndUpdate(fileId, { deleted: true, deletedAt: new Date() });
@@ -116,8 +116,32 @@ export async function restoreFile(userId: string, fileId: string) {
   const file = await File.findOne({ _id: fileId, owner_id: userId, deleted: true }).lean();
   if (!file) throw new ServiceError("File not found in recycle bin", 404);
 
-  await File.findByIdAndUpdate(fileId, { deleted: false, deletedAt: null });
-  return file;
+  // A file can be individually restored from the recycle bin even when its
+  // parent folder is a deleted folder (folders have no restore path of
+  // their own — see cascadeDeleteFolderContents) or was hard-deleted
+  // outright. Leaving folderId pointing at that folder would resurrect the
+  // file into a dead end: reachable by "All files" (deleted: false) but
+  // absent from every folder-scoped listing, since those all filter out
+  // deleted folders. Falling back to root keeps the restored file reachable.
+  const folderId = file.folderId ?? file.folders_id ?? null;
+  let restoreToRoot = false;
+  if (folderId) {
+    const parentFolder = await Folder.findOne({ _id: folderId, deleted: { $ne: true } }).lean();
+    restoreToRoot = !parentFolder;
+  }
+
+  // {new: true} — returning the pre-update snapshot here would report the
+  // file back to the caller as still deleted:true despite the restore
+  // having just succeeded.
+  return File.findByIdAndUpdate(
+    fileId,
+    {
+      deleted: false,
+      deletedAt: null,
+      ...(restoreToRoot ? { folderId: null, folders_id: null } : {}),
+    },
+    { new: true },
+  ).lean();
 }
 
 export async function confirmFile(userId: string, fileId: string) {
@@ -141,7 +165,9 @@ export async function getFileDownload(userId: string, fileId: string, preview: b
   if (!ObjectId.isValid(fileId)) throw new ServiceError("Invalid file id", 400);
   await connectDB();
 
-  const file = await File.findOne({ _id: fileId, owner_id: userId, status: "uploaded" }).lean();
+  // deleted: excluded — a file sitting in the recycle bin isn't reachable
+  // through the normal download route; it must be restored first.
+  const file = await File.findOne({ _id: fileId, owner_id: userId, status: "uploaded", deleted: { $ne: true } }).lean();
   if (!file) throw new ServiceError("File not found", 404);
 
   let version;
@@ -182,7 +208,7 @@ export async function getFileManifest(userId: string, fileId: string, versionId?
   if (!ObjectId.isValid(fileId)) throw new ServiceError("Invalid file id", 400);
   await connectDB();
 
-  const file = await File.findOne({ _id: fileId, owner_id: userId, status: "uploaded" }).lean();
+  const file = await File.findOne({ _id: fileId, owner_id: userId, status: "uploaded", deleted: { $ne: true } }).lean();
   if (!file) throw new ServiceError("File not found", 404);
 
   let version;
@@ -220,7 +246,7 @@ export async function getFileChunkData(userId: string, fileId: string, versionId
   if (!ObjectId.isValid(fileId)) throw new ServiceError("Invalid file id", 400);
   await connectDB();
 
-  const file = await File.findOne({ _id: fileId, owner_id: userId, status: "uploaded" }).lean();
+  const file = await File.findOne({ _id: fileId, owner_id: userId, status: "uploaded", deleted: { $ne: true } }).lean();
   if (!file) throw new ServiceError("File not found", 404);
   if (file.encryptionMode !== "dek") throw new ServiceError("File does not require client-side decryption", 409);
 

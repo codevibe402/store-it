@@ -113,6 +113,7 @@ export async function POST(req: NextRequest) {
         owner_id: user._id,
         status: "s3_pending",
         backend: "s3",
+        deleted: { $ne: true },
       });
       if (!existingFileRecord) {
         return NextResponse.json(
@@ -137,6 +138,7 @@ export async function POST(req: NextRequest) {
         hash,
         owner_id: owner._id,
         status: "uploaded",
+        deleted: { $ne: true },
       });
 
       if (existingFileRecord) {
@@ -182,6 +184,7 @@ export async function POST(req: NextRequest) {
       folderId: normalizedFolderId,
       status: "uploaded",
       hash: { $ne: hash },
+      deleted: { $ne: true },
     });
 
     if (existingByName) {

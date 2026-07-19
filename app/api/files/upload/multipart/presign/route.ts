@@ -23,20 +23,26 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const urls = await Promise.all(
-    partNumbers.map((partNumber) =>
-      getSignedUrl(
-        s3,
-        new UploadPartCommand({
-          Bucket: BUCKET,
-          Key: key,
-          UploadId: uploadId,
-          PartNumber: partNumber,
-        }),
-        { expiresIn: 60 * 30 }
+  let urls: string[];
+  try {
+    urls = await Promise.all(
+      partNumbers.map((partNumber) =>
+        getSignedUrl(
+          s3,
+          new UploadPartCommand({
+            Bucket: BUCKET,
+            Key: key,
+            UploadId: uploadId,
+            PartNumber: partNumber,
+          }),
+          { expiresIn: 60 * 30 }
+        )
       )
-    )
-  );
+    );
+  } catch (err) {
+    console.error(`[POST /api/files/upload/multipart/presign] failed to presign ${partNumbers.length} part(s) for key ${key}`, err);
+    return NextResponse.json({ error: "Failed to generate upload URLs" }, { status: 500 });
+  }
 
   return NextResponse.json({ urls });
 }

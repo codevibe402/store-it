@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { getSessionDEK, encryptChunk } from "./useFileEncryption";
 import { storeQueueItem, removeQueueItem, getAllQueueItems } from "@/client/lib/uploadQueueDB";
 import { storeFile as storeResumeFile } from "@/client/lib/indexedDB";
@@ -114,6 +115,125 @@ export function useUpload(currentFolderId: string | null) {
       prev.map((u) => (u.id === id && u.status === "uploading" ? { ...u, status: "paused" as const } : u))
     );
   }, []);
+
+  // Runs when Telegram signals canFallbackToS3 (3 failed chunk attempts).
+  // The server-side fallback route always discards whatever made it to
+  // Telegram and hands back a fresh S3 multipart session — see
+  // app/api/files/[id]/fallback-to-s3/route.ts — so this drives a full
+  // upload from 0%, not a continuation. Note: the S3 path has no
+  // client-side-decrypt mechanism (manifest/chunk-data routes are
+  // Telegram-only), so a file that was being DEK-encrypted loses that
+  // zero-knowledge protection once it falls back — it's stored as
+  // plaintext, and the server already resets encryptionMode to "none" to
+  // keep the DB record honest about that.
+  const fallbackToS3 = useCallback(async (
+    id: string,
+    file: File,
+    fileId: string,
+    hash: string,
+    controller: AbortController,
+  ) => {
+    toast.info(`"${file.name}" — Telegram upload failed, retrying via backup storage…`);
+    updateUpload(id, { progress: 0, error: "" });
+
+    const switchRes = await fetch(`/api/files/${fileId}/fallback-to-s3`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "telegram_failed_after_retries" }),
+      signal: controller.signal,
+    });
+    if (!switchRes.ok) {
+      const body = await switchRes.json().catch(() => ({}));
+      console.error(`[useUpload] fallbackToS3: switch-to-s3 call failed for file ${fileId} (status ${switchRes.status})`, body.error);
+      throw new Error(body.error || "Failed to switch to backup storage");
+    }
+
+    const initRes = await fetch("/api/files/fallback-to-s3/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileId,
+        filename: file.name,
+        mimeType: file.type || "application/octet-stream",
+        size: file.size,
+        hash,
+      }),
+      signal: controller.signal,
+    });
+    if (!initRes.ok) {
+      const body = await initRes.json().catch(() => ({}));
+      console.error(`[useUpload] fallbackToS3: init call failed for file ${fileId} (status ${initRes.status})`, body.error);
+      throw new Error(body.error || "Failed to start backup upload");
+    }
+    const { uploadId, key, totalParts } = await initRes.json() as { uploadId: string; key: string; totalParts: number };
+
+    const PART_SIZE = 10 * 1024 * 1024; // must match app/api/files/fallback-to-s3/init/route.ts
+    const partNumbers = Array.from({ length: totalParts }, (_, i) => i + 1);
+
+    const presignRes = await fetch("/api/files/upload/multipart/presign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, uploadId, partNumbers }),
+      signal: controller.signal,
+    });
+    if (!presignRes.ok) {
+      console.error(`[useUpload] fallbackToS3: presign call failed for file ${fileId} (status ${presignRes.status})`);
+      throw new Error("Failed to get backup upload URLs");
+    }
+    const { urls } = await presignRes.json() as { urls: string[] };
+
+    const parts: { PartNumber: number; ETag: string }[] = [];
+
+    for (let i = 0; i < totalParts; i++) {
+      if (controller.signal.aborted) throw Object.assign(new Error("Cancelled"), { isCancelled: true });
+
+      const partNumber = i + 1;
+      const start = i * PART_SIZE;
+      const end = Math.min(start + PART_SIZE, file.size);
+      const partBlob = file.slice(start, end);
+
+      let etag: string | null = null;
+      let lastErr: Error | null = null;
+      for (let attempt = 0; attempt < 3 && !etag; attempt++) {
+        // Mirrors the abort check the Telegram chunk-retry loop already has
+        // (see uploadChunks above) — without it, a cancel mid-part-retry
+        // fell through to catch the resulting AbortError as a transient
+        // failure and burned a full backoff sleep (up to ~3s) retrying a
+        // request against an already-aborted signal instead of stopping
+        // immediately.
+        if (controller.signal.aborted) break;
+        try {
+          const putRes = await fetch(urls[i], { method: "PUT", body: partBlob, signal: controller.signal });
+          if (!putRes.ok) throw new Error(`Backup upload failed on part ${partNumber}`);
+          etag = putRes.headers.get("ETag");
+          if (!etag) throw new Error(`Backup upload part ${partNumber} returned no ETag`);
+        } catch (err) {
+          lastErr = err as Error;
+          console.warn(`[useUpload] fallbackToS3: part ${partNumber}/${totalParts} attempt ${attempt + 1}/3 failed for file ${fileId}`, err);
+          if (attempt < 2 && !controller.signal.aborted) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        }
+      }
+      if (!etag) {
+        if (controller.signal.aborted) throw Object.assign(new Error("Cancelled"), { isCancelled: true });
+        console.error(`[useUpload] fallbackToS3: part ${partNumber}/${totalParts} permanently failed for file ${fileId} after 3 attempts`, lastErr);
+        throw lastErr || new Error(`Backup upload part ${partNumber} failed`);
+      }
+
+      parts.push({ PartNumber: partNumber, ETag: etag });
+      updateUpload(id, { progress: Math.round((partNumber / totalParts) * 100) });
+    }
+
+    const completeRes = await fetch("/api/files/upload/multipart/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, uploadId, parts, fileId }),
+      signal: controller.signal,
+    });
+    if (!completeRes.ok) {
+      console.error(`[useUpload] fallbackToS3: complete call failed for file ${fileId} (status ${completeRes.status})`);
+      throw new Error("Failed to finish backup upload");
+    }
+  }, [updateUpload]);
 
   const resumeSingleUpload = useCallback(async (id: string) => {
     // Check if this is a restored file (from IndexedDB queue, not yet init'd)
@@ -231,6 +351,7 @@ export function useUpload(currentFolderId: string | null) {
         chunkForm.append("useEncryption", cryptoKey ? "false" : "true");
 
         let success = false;
+        let sawCanFallbackToS3 = false;
         for (let attempt = 0; attempt < 3 && !success; attempt++) {
           if (cancelRef.current || pausedIds.current.has(id) || controller.signal.aborted) break;
           try {
@@ -241,7 +362,15 @@ export function useUpload(currentFolderId: string | null) {
             });
             if (!chunkRes.ok) {
               const errBody = await chunkRes.json().catch(() => ({}));
-              if (errBody.canFallbackToS3) throw new Error("Telegram upload failed; fallback to S3");
+              // The `canFallbackToS3: true` flag must survive on the thrown
+              // error itself — without Object.assign here, the check right
+              // below (`e.canFallbackToS3`) and the one after the loop can
+              // never see it, and the server's "give up on Telegram" signal
+              // is silently lost. This previously made the entire S3-fallback
+              // feature unreachable: the server would say canFallbackToS3,
+              // and the client would just retry Telegram 2 more times and
+              // then fail with a plain, unflagged error.
+              if (errBody.canFallbackToS3) throw Object.assign(new Error("Telegram upload failed; fallback to S3"), { canFallbackToS3: true });
               if (attempt >= 2) throw new Error(`Chunk ${i} failed`);
             } else {
               success = true;
@@ -252,12 +381,13 @@ export function useUpload(currentFolderId: string | null) {
             if (cancelRef.current || pausedIds.current.has(id) || controller.signal.aborted) break;
             const e = err as Error & { isCancelled?: boolean; canFallbackToS3?: boolean };
             if (e.isCancelled) break;
+            if (e.canFallbackToS3) sawCanFallbackToS3 = true;
             if (e.canFallbackToS3 && attempt >= 2) throw e;
             if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
           }
         }
         if (!success && !cancelRef.current && !pausedIds.current.has(id) && !controller.signal.aborted) {
-          throw new Error(`Chunk ${i} failed after 3 attempts`);
+          throw Object.assign(new Error(`Chunk ${i} failed after 3 attempts`), { canFallbackToS3: sawCanFallbackToS3 });
         }
       }
 
@@ -290,16 +420,51 @@ export function useUpload(currentFolderId: string | null) {
       removeQueueItem(id).catch(() => {});
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     } catch (err: unknown) {
-      abortControllers.current.delete(id);
-      const e = err as Error & { isCancelled?: boolean };
+      const e = err as Error & { isCancelled?: boolean; canFallbackToS3?: boolean };
       if (e.isCancelled || controller.signal.aborted || pausedIds.current.has(id)) {
+        abortControllers.current.delete(id);
         setUploads((prev) => prev.filter((u) => u.id !== id));
         removeQueueItem(id).catch(() => {});
         return;
       }
+
+      if (e.canFallbackToS3) {
+        try {
+          await fallbackToS3(id, file, fileId, hash, controller);
+          abortControllers.current.delete(id);
+          updateUpload(id, { status: "success", progress: 100 });
+          uploadMeta.current.delete(id);
+          removeQueueItem(id).catch(() => {});
+          queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+          return;
+        } catch (fallbackErr: unknown) {
+          abortControllers.current.delete(id);
+          const fe = fallbackErr as Error & { isCancelled?: boolean };
+          if (fe.isCancelled || controller.signal.aborted) {
+            setUploads((prev) => prev.filter((u) => u.id !== id));
+            uploadMeta.current.delete(id);
+            removeQueueItem(id).catch(() => {});
+            return;
+          }
+          console.error(`[useUpload] S3 fallback failed for upload ${id} (fileId ${fileId})`, fe);
+          // The switch-to-s3 call inside fallbackToS3 already succeeded (it's
+          // what made the fallback attempt possible), so the file's backend
+          // is permanently "s3" server-side by this point even though the
+          // upload itself didn't finish. The stale Telegram uploadMeta (its
+          // totalChunks/chunkSize describe a backend the file no longer
+          // uses) must not survive to a later resume click — otherwise
+          // resumeSingleUpload would walk the dead Telegram-chunk resume
+          // path against a file the server no longer accepts chunks for.
+          uploadMeta.current.delete(id);
+          updateUpload(id, { status: "error", error: fe.message || "Backup upload failed" });
+          return;
+        }
+      }
+
+      abortControllers.current.delete(id);
       updateUpload(id, { status: "error", error: e.message || "Upload failed" });
     }
-  }, [queryClient, updateUpload, currentFolderId]);
+  }, [queryClient, updateUpload, currentFolderId, fallbackToS3]);
 
   const uploadChunks = useCallback(async (
     id: string,
@@ -353,6 +518,7 @@ export function useUpload(currentFolderId: string | null) {
       chunkForm.append("useEncryption", cryptoKey ? "false" : "true");
 
       let success = false;
+      let sawCanFallbackToS3 = false;
       for (let attempt = 0; attempt < 3 && !success; attempt++) {
         if (cancelRef.current || pauseRef.current || pausedIds.current.has(id) || controller.signal.aborted) break;
         try {
@@ -363,7 +529,11 @@ export function useUpload(currentFolderId: string | null) {
           });
           if (!chunkRes.ok) {
             const errBody = await chunkRes.json().catch(() => ({}));
-            if (errBody.canFallbackToS3) throw new Error("Telegram upload failed; fallback to S3");
+            // See the matching comment in resumeSingleUpload's copy of this
+            // loop: without Object.assign, the canFallbackToS3 flag never
+            // survives being re-thrown, silently breaking the S3-fallback
+            // feature entirely.
+            if (errBody.canFallbackToS3) throw Object.assign(new Error("Telegram upload failed; fallback to S3"), { canFallbackToS3: true });
             if (attempt >= 2) throw new Error(`Chunk ${i} failed`);
           } else {
             success = true;
@@ -374,12 +544,13 @@ export function useUpload(currentFolderId: string | null) {
           if (cancelRef.current || pauseRef.current || pausedIds.current.has(id) || controller.signal.aborted) break;
           const e = err as Error & { isCancelled?: boolean; canFallbackToS3?: boolean };
           if (e.isCancelled) break;
+          if (e.canFallbackToS3) sawCanFallbackToS3 = true;
           if (e.canFallbackToS3 && attempt >= 2) throw e;
           if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
         }
       }
       if (!success && !cancelRef.current && !pauseRef.current && !pausedIds.current.has(id) && !controller.signal.aborted) {
-        throw new Error(`Chunk ${i} failed after 3 attempts`);
+        throw Object.assign(new Error(`Chunk ${i} failed after 3 attempts`), { canFallbackToS3: sawCanFallbackToS3 });
       }
     }
 
@@ -435,8 +606,14 @@ export function useUpload(currentFolderId: string | null) {
     const controller = new AbortController();
     abortControllers.current.set(id, controller);
 
+    // Hoisted so the catch block below can reach them for the S3 fallback
+    // (a canFallbackToS3 error can only happen after both are set, i.e.
+    // once the Telegram chunk loop has actually started).
+    let hash = "";
+    let fileId: string | undefined;
+
     try {
-      const hash = await getFileHash(file);
+      hash = await getFileHash(file);
 
       if (file.size <= SMALL_FILE_LIMIT) {
         const progressInterval = setInterval(() => {
@@ -505,7 +682,7 @@ export function useUpload(currentFolderId: string | null) {
         return;
       }
 
-      const fileId = initData.fileId;
+      fileId = initData.fileId as string;
       const totalChunks = initData.totalChunks;
       const chunkSize = initData.chunkSize || 4 * 1024 * 1024;
 
@@ -565,17 +742,48 @@ export function useUpload(currentFolderId: string | null) {
       removeQueueItem(id).catch(() => {});
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     } catch (err: unknown) {
-      abortControllers.current.delete(id);
-      const e = err as Error & { isCancelled?: boolean };
+      const e = err as Error & { isCancelled?: boolean; canFallbackToS3?: boolean };
       if (e.isCancelled || controller.signal.aborted) {
+        abortControllers.current.delete(id);
         setUploads((prev) => prev.filter((u) => u.id !== id));
         uploadMeta.current.delete(id);
         removeQueueItem(id).catch(() => {});
         return;
       }
+
+      if (e.canFallbackToS3 && fileId) {
+        try {
+          await fallbackToS3(id, file, fileId, hash, controller);
+          abortControllers.current.delete(id);
+          updateUpload(id, { status: "success", progress: 100 });
+          uploadMeta.current.delete(id);
+          removeQueueItem(id).catch(() => {});
+          queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+          return;
+        } catch (fallbackErr: unknown) {
+          abortControllers.current.delete(id);
+          const fe = fallbackErr as Error & { isCancelled?: boolean };
+          if (fe.isCancelled || controller.signal.aborted) {
+            setUploads((prev) => prev.filter((u) => u.id !== id));
+            uploadMeta.current.delete(id);
+            removeQueueItem(id).catch(() => {});
+            return;
+          }
+          console.error(`[useUpload] S3 fallback failed for upload ${id} (fileId ${fileId})`, fe);
+          // See matching comment in resumeSingleUpload's catch block: the
+          // file's backend is already permanently "s3" server-side once
+          // fallbackToS3 got this far, so stale Telegram uploadMeta must not
+          // survive to a later resume click.
+          uploadMeta.current.delete(id);
+          updateUpload(id, { status: "error", error: fe.message || "Backup upload failed" });
+          return;
+        }
+      }
+
+      abortControllers.current.delete(id);
       updateUpload(id, { status: "error", error: e.message || "Upload failed" });
     }
-  }, [currentFolderId, queryClient, updateUpload, uploadChunks]);
+  }, [currentFolderId, queryClient, updateUpload, uploadChunks, fallbackToS3]);
 
   // Expose handleFile via ref so resumeSingleUpload can call it
   handleFileRef.current = handleFile;

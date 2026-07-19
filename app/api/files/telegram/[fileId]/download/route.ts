@@ -102,7 +102,10 @@ export async function GET(
 
   const headers: Record<string, string> = {
     "Content-Type": file.mimetype || "application/octet-stream",
-    "Content-Disposition": `attachment; filename="${file.filename}"`,
+    // file.filename is the user-supplied original upload name — a raw quote
+    // in it breaks out of the quoted filename="..." parameter. Percent-encode
+    // it, matching server/lib/download.ts's S3/Telegram download helpers.
+    "Content-Disposition": `attachment; filename="${encodeURIComponent(file.filename)}"`,
     "Content-Length": file.size.toString(),
   };
 

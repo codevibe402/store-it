@@ -28,24 +28,31 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  await s3.send(
-    new CompleteMultipartUploadCommand({
-      Bucket: BUCKET,
-      Key: key,
-      UploadId: uploadId,
-      MultipartUpload: {
-        Parts: parts.map((p) => ({ PartNumber: p.PartNumber, ETag: p.ETag })),
-      },
-    })
-  );
+  try {
+    await s3.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: BUCKET,
+        Key: key,
+        UploadId: uploadId,
+        MultipartUpload: {
+          Parts: parts.map((p) => ({ PartNumber: p.PartNumber, ETag: p.ETag })),
+        },
+      })
+    );
+  } catch (err) {
+    console.error(`[POST /api/files/upload/multipart/complete] S3 CompleteMultipartUpload failed for key ${key} (${parts.length} part(s))`, err);
+    return NextResponse.json({ error: "Failed to finalize upload in storage" }, { status: 500 });
+  }
 
   await connectDB();
 
   const file = await File.findById(fileId);
   if (!file) {
+    console.warn(`[POST /api/files/upload/multipart/complete] file ${fileId} not found after S3 completed (key ${key})`);
     return NextResponse.json({ error: "File record not found" }, { status: 404 });
   }
   if (file.owner_email !== user.email) {
+    console.warn(`[POST /api/files/upload/multipart/complete] forbidden: ${user.email} does not own file ${fileId}`);
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -58,6 +65,7 @@ export async function POST(req: NextRequest) {
           status: "uploaded",
           hash: { $ne: file.hash },
           _id: { $ne: file._id },
+          deleted: { $ne: true },
         })
       : null;
 

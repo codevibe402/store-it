@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
     let query = File.find({
       owner_email: user.email,
       status: statuses.length === 1 ? statuses[0] : { $in: statuses },
+      deleted: { $ne: true },
     })
       .select("_id filename mimetype size folderId folders_id backend status createdAt updatedAt owner_id hash")
       .sort({ createdAt: -1 });

@@ -19,7 +19,7 @@ async function sleep(ms: number) {
 export async function POST(req: NextRequest) {
   const user = await getAuthUser();
   if (!user?.email) {
-    return NextResponse.json({ error: "Unauthorized - please login", status: 401 });
+    return NextResponse.json({ error: "Unauthorized - please login" }, { status: 401 });
   }
 
   const form = await req.formData();
@@ -30,28 +30,43 @@ export async function POST(req: NextRequest) {
   const chunkFile = form.get("chunk") as Blob | null;
 
   if (!fileId || !chunkIndexStr || !hash || !chunkFile) {
-    return NextResponse.json({ error: "fileId, chunkIndex, hash, and chunk are required", status: 400 });
+    return NextResponse.json({ error: "fileId, chunkIndex, hash, and chunk are required" }, { status: 400 });
   }
 
   const chunkIndex = parseInt(chunkIndexStr, 10);
   if (isNaN(chunkIndex) || chunkIndex < 0) {
-    return NextResponse.json({ error: "Invalid chunkIndex", status: 400 });
+    return NextResponse.json({ error: "Invalid chunkIndex" }, { status: 400 });
   }
 
   await connectDB();
 
   const file = await File.findById(fileId);
-  if (!file) return NextResponse.json({ error: "File not found", status: 404 });
+  if (!file) {
+    console.warn(`[POST /api/files/telegram/chunk] file ${fileId} not found (chunk ${chunkIndex})`);
+    return NextResponse.json({ error: "File not found" }, { status: 404 });
+  }
   // Re-checked on every single chunk, not just once at init — the
   // permission-revoked-mid-upload and folder-moved/ownership-transferred
   // -mid-upload requirements both need this to be live, not cached from
   // whatever was true when the upload started.
   if (!(await canUploadToFile(user.userId, file))) {
-    return NextResponse.json({ error: "Forbidden", status: 403 }, { status: 403 });
+    console.warn(`[POST /api/files/telegram/chunk] forbidden: user ${user.userId} may not upload to file ${fileId}`);
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  if (file.backend !== "telegram") return NextResponse.json({ error: "File is not using Telegram backend", status: 409 });
+  if (file.backend !== "telegram") {
+    // Reachable if the client still holds stale Telegram upload metadata
+    // for a file whose backend was already switched to S3 by the
+    // fallback-to-s3 route (e.g. a resume/retry click after a failed S3
+    // fallback attempt). Must be a real non-2xx status — a previous
+    // version of this branch returned 200 here, which made the client's
+    // `!chunkRes.ok` check silently treat the rejection as a successful
+    // chunk upload.
+    console.warn(`[POST /api/files/telegram/chunk] rejected: file ${fileId} backend is "${file.backend}", not telegram (chunk ${chunkIndex})`);
+    return NextResponse.json({ error: "File is not using Telegram backend" }, { status: 409 });
+  }
   if (!["pending", "uploading", "paused"].includes(file.status)) {
-    return NextResponse.json({ error: `File is in "${file.status}" state`, status: 409 });
+    console.warn(`[POST /api/files/telegram/chunk] rejected: file ${fileId} is in "${file.status}" state (chunk ${chunkIndex})`);
+    return NextResponse.json({ error: `File is in "${file.status}" state` }, { status: 409 });
   }
 
   if (file.status === "pending" || file.status === "paused") {
@@ -115,6 +130,7 @@ export async function POST(req: NextRequest) {
           await deleteMessage(messageId);
           return NextResponse.json({ message: "Chunk already recorded", chunkIndex, telegramFileId: dbErr?.telegramFileId || tgFileId });
         }
+        console.error(`[POST /api/files/telegram/chunk] failed to record chunk ${chunkIndex} for file ${fileId} after Telegram send succeeded; deleting orphaned Telegram message`, dbErr);
         await deleteMessage(messageId);
         throw dbErr;
       }
@@ -123,9 +139,11 @@ export async function POST(req: NextRequest) {
     } catch (err: any) {
       lastError = err;
       if (err?.code === 429 && attempt < RETRY_DELAYS.length - 1) {
+        console.warn(`[POST /api/files/telegram/chunk] rate-limited on file ${fileId} chunk ${chunkIndex}, retrying (attempt ${attempt + 1}/${MAX_RETRIES})`);
         await sleep(RETRY_DELAYS[attempt]);
         continue;
       }
+      console.error(`[POST /api/files/telegram/chunk] permanently failed file ${fileId} chunk ${chunkIndex} after ${attempt + 1} attempt(s); signaling S3 fallback`, err);
       return NextResponse.json({ error: `Upload failed: ${err?.message || "Unknown"}`, chunkIndex, canFallbackToS3: true }, { status: 503 });
     }
   }
