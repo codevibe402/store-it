@@ -201,6 +201,28 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     })();
   }, [exempt, exchangeSession]);
 
+  // Silently keeps access_token alive for as long as the tab stays open.
+  // Nothing else in the app ever refreshes it proactively — fetchUser() is
+  // otherwise only called once, at mount. access_token expires after 15
+  // minutes (ACCESS_COOKIE_OPTIONS.maxAge, server/auth/auth.ts) with no
+  // auto-refresh-on-401 anywhere in the client's fetch calls, so any
+  // long-running operation (a large-file Telegram upload, which chunks
+  // sequentially and can easily run past 15 minutes) or simply an idle tab
+  // left open past that window starts getting a flat 401 on every request
+  // — which for the upload chunk loop in hooks/useUpload.ts looks like
+  // "chunk failed after 3 attempts" with no S3-fallback trigger, since the
+  // 401 response carries no canFallbackToS3 flag. A fixed interval well
+  // under the 15-minute lifetime, calling the same already-safe
+  // fetchUser() the initial mount uses (renews the session's own,
+  // already-verified refresh_token — never mints a new identity from
+  // ambient state, the thing rule 6 in SESSION_EXCHANGE_VULNERABILITY.md
+  // warns against), keeps it from ever going stale while the tab is open.
+  useEffect(() => {
+    if (exempt || !user) return;
+    const interval = setInterval(() => { void fetchUser(); }, 10 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [exempt, user, fetchUser]);
+
   // Bootstrap the session DEK once a user is authenticated — works the same
   // regardless of login method (credentials, Google, Telegram), since it
   // never depends on a password. A known device unlocks silently from its
