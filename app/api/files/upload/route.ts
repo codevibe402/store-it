@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
+import mongoose from "mongoose";
 import { getAuthUser } from "@/server/auth/auth";
 import connectDB from "@/adapters/database/mongoose";
 import { s3, BUCKET } from "@/adapters/storage/s3";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import File from "@/adapters/database/models/File";
-import FileVersion from "@/adapters/database/models/FileVersion";
 import Folder from "@/adapters/database/models/Folder";
 import User from "@/adapters/database/models/User";
 import { extractSearchText } from "@/server/lib/fileText";
 import { resolveFolderPermission, atLeast } from "@/server/services/permissionService";
+import { findConflictingUploadedFile, mergeAsNewVersion, createInitialVersion } from "@/server/services/versioningService";
 
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 
@@ -178,84 +179,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ file }, { status: 201 });
     }
 
-    const existingByName = await File.findOne({
-      filename,
-      owner_id: owner._id,
-      folderId: normalizedFolderId,
-      status: "uploaded",
-      hash: { $ne: hash },
-      deleted: { $ne: true },
-    });
+    const content = { backend: "s3" as const, storageUrl: key, hash, size, mimetype: mimeType };
+    const extraFileFields = { searchText, textIndexedAt: searchText ? new Date() : null };
 
-    if (existingByName) {
-      const latestVersion = await FileVersion.findOne({ file_id: existingByName._id })
-        .sort({ version: -1 })
-        .lean();
-      const nextVersion = (latestVersion?.version ?? 1) + 1;
+    const session = await mongoose.startSession();
+    try {
+      let result: { file: InstanceType<typeof File>; version: number; versioned: boolean } | undefined;
 
-      const version = await FileVersion.create({
-        file_id: existingByName._id,
-        version: nextVersion,
-        backend: "s3",
-        storageUrl: key,
-        hash,
-        size,
-        mimetype: mimeType,
-        createdBy: user._id,
+      await session.withTransaction(async () => {
+        const existingByName = await findConflictingUploadedFile({
+          session,
+          filename,
+          ownerId: owner._id,
+          folderId: normalizedFolderId,
+          hash,
+        });
+
+        result = existingByName
+          ? await mergeAsNewVersion({ session, existingFile: existingByName, content, createdBy: user._id, extraFileFields })
+          : await createInitialVersion({
+              session,
+              file: new File({
+                filename,
+                hash,
+                owner_email: owner.email,
+                owner_id: owner._id,
+                folders_id: normalizedFolderId,
+                folderId: normalizedFolderId,
+                status: "pending",
+              }),
+              content,
+              createdBy: user._id,
+              extraFileFields,
+            });
       });
 
-      const oldSize = existingByName.size ?? 0;
-      existingByName.hash = hash;
-      existingByName.mimetype = mimeType;
-      existingByName.size = size;
-      existingByName.storageUrl = key;
-      existingByName.backend = "s3";
-      existingByName.searchText = searchText;
-      existingByName.textIndexedAt = searchText ? new Date() : null;
-      existingByName.currentVersionId = version._id;
-      await existingByName.save();
-
-      await User.findByIdAndUpdate(owner._id, { $inc: { storageused: size - oldSize } });
-
       return NextResponse.json(
-        { file: existingByName, version: nextVersion, versioned: true },
+        result!.versioned ? { file: result!.file, version: result!.version, versioned: true } : { file: result!.file },
         { status: 201 }
       );
+    } finally {
+      await session.endSession();
     }
-
-    file = await File.create({
-      filename,
-      hash,
-      owner_email: owner.email,
-      owner_id: owner._id,
-      mimetype: mimeType,
-      size,
-      searchText,
-      textIndexedAt: searchText ? new Date() : null,
-      storageUrl: key,
-      backend: "s3",
-      folders_id: normalizedFolderId,
-      folderId: normalizedFolderId,
-      status: "uploaded",
-    });
-
-    const version = await FileVersion.create({
-      file_id: file._id,
-      version: 1,
-      backend: "s3",
-      storageUrl: key,
-      hash,
-      size,
-      mimetype: mimeType,
-      createdBy: user._id,
-    });
-
-    file.currentVersionId = version._id;
-    await file.save();
-
-    await User.findByIdAndUpdate(owner._id, { $inc: { storageused: size } });
-
-    return NextResponse.json({ file }, { status: 201 });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "Server error" }, { status: 500 });

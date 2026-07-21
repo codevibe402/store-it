@@ -12,11 +12,21 @@ type VersionsDialogProps = {
   versionTarget: any;
   versions: VersionInfo[];
   versionsLoading: boolean;
+  restoringVersionId?: string | null;
   setVersionTarget: (target: any) => void;
   onOpenVersion: (version: VersionInfo) => void;
+  onRestoreVersion?: (version: VersionInfo) => void;
 };
 
-export default function VersionsDialog({ versionTarget, versions, versionsLoading, setVersionTarget, onOpenVersion }: VersionsDialogProps) {
+export default function VersionsDialog({
+  versionTarget,
+  versions,
+  versionsLoading,
+  restoringVersionId,
+  setVersionTarget,
+  onOpenVersion,
+  onRestoreVersion,
+}: VersionsDialogProps) {
   if (!versionTarget) return null;
 
   return (
@@ -31,21 +41,36 @@ export default function VersionsDialog({ versionTarget, versions, versionsLoadin
             <div className="text-xs text-[var(--sage,#6b7280)] py-4">No versions recorded yet.</div>
           ) : (
             versions.map((version) => (
-              <button
+              <div
                 key={version.id}
                 className={cn(
-                  "flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium rounded-[2px] border transition",
+                  "flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-[2px] border transition",
                   version.isCurrent
                     ? "border-[var(--brass,#6c8eff)]/40 bg-[var(--brass,#6c8eff)]/10 text-[var(--brass-bright,#6c8eff)]"
-                    : "border-[var(--line-strong,#4b5563)] bg-transparent text-[var(--paper-dim,#9ca3af)] hover:bg-[var(--panel-2,#13161e)]"
+                    : "border-[var(--line-strong,#4b5563)] bg-transparent text-[var(--paper-dim,#9ca3af)]"
                 )}
-                onClick={() => onOpenVersion(version)}
               >
-                v{version.version}
-                <span className="text-xs text-[var(--sage,#6b7280)] ml-auto">
-                  {version.isCurrent ? "Current" : new Date(version.uploadedAt).toLocaleDateString()}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  className="flex items-center gap-2 flex-1 min-w-0 text-left hover:opacity-80"
+                  onClick={() => onOpenVersion(version)}
+                >
+                  v{version.version}
+                  <span className="text-xs text-[var(--sage,#6b7280)] ml-auto">
+                    {version.isCurrent ? "Current" : new Date(version.uploadedAt).toLocaleDateString()}
+                  </span>
+                </button>
+                {!version.isCurrent && onRestoreVersion && (
+                  <button
+                    type="button"
+                    disabled={restoringVersionId === version.id}
+                    className="shrink-0 px-2 py-1 text-[0.7rem] font-semibold rounded-[2px] border border-[var(--brass,#6c8eff)]/40 text-[var(--brass-bright,#6c8eff)] hover:bg-[var(--brass,#6c8eff)]/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                    onClick={() => onRestoreVersion(version)}
+                  >
+                    {restoringVersionId === version.id ? "Restoring…" : "Restore"}
+                  </button>
+                )}
+              </div>
             ))
           )}
         </div>

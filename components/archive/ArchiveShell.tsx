@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSession } from "next-auth/react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useAuth } from "@/components/AuthProvider";
 import { useFiles } from "@/hooks/useFiles";
 import { useFolders } from "@/hooks/useFolders";
 import { useFolderShare } from "@/hooks/useFolderShare";
@@ -36,8 +36,12 @@ const PAGES: Record<ArchivePageId, React.ComponentType> = {
 };
 
 export default function ArchiveShell() {
-  const { status: sessionStatus } = useSession();
-  const isAuthenticated = sessionStatus === "authenticated";
+  // The app's own JWT session (what every API route actually enforces),
+  // not NextAuth's useSession() — those two can disagree (see
+  // SESSION_EXCHANGE_VULNERABILITY.md), and gating on the wrong one is
+  // exactly what let this page render a full (if empty) shell instead of
+  // redirecting after logout.
+  const { isAuthenticated } = useAuth();
   const reduceMotion = useReducedMotion();
 
   const [activePage, setActivePage] = useState<ArchivePageId>("overview");
@@ -305,7 +309,9 @@ export default function ArchiveShell() {
           setVersionTarget={fileActions.setVersionTarget}
           versions={fileActions.versions}
           versionsLoading={fileActions.versionsLoading}
+          restoringVersionId={fileActions.restoringVersionId}
           onOpenVersion={fileActions.openVersionUrl}
+          onRestoreVersion={fileActions.restoreVersion}
         />
       </div>
     </ArchiveContext.Provider>

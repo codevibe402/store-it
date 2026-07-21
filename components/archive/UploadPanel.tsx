@@ -2,8 +2,8 @@
 
 import { memo, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
+import { useAuth } from "@/components/AuthProvider";
 import { AlertCircle, CheckCircle, CloudUpload, FileText, RotateCcw, XCircle } from "lucide-react";
 import { useUpload, UploadEntry } from "@/hooks/useUpload";
 import { useResume } from "@/hooks/useResume";
@@ -17,8 +17,9 @@ type UploadPanelProps = {
 };
 
 function UploadPanel({ currentFolderId = null }: UploadPanelProps) {
-  const { status: sessionStatus } = useSession();
-  const isAuthenticated = sessionStatus === "authenticated";
+  // See the matching comment in ArchiveShell.tsx — the app's own JWT
+  // session, not NextAuth's useSession(), is what actually gates access.
+  const { isAuthenticated } = useAuth();
 
   const [currentFolderIdState, setCurrentFolderIdState] = useState<string | null>(currentFolderId ?? null);
 

@@ -1,7 +1,6 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { signOut } from 'next-auth/react';
 import { useAuth } from '@/components/AuthProvider';
 
 export default function LogoutButton({ className }: { className?: string }) {
@@ -9,8 +8,8 @@ export default function LogoutButton({ className }: { className?: string }) {
   const { logout } = useAuth();
 
   const handleLogout = async () => {
+    // logout() clears both session systems (app JWT + NextAuth) itself.
     await logout();
-    await signOut({ redirect: false });
     router.push('/sign_in');
   };
 

@@ -2,8 +2,9 @@
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSession } from "next-auth/react";
 import { apiClient } from "@/client/lib/apiClient";
+import { useAuth } from "@/components/AuthProvider";
+import RequireAuth from "@/components/RequireAuth";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type FileType = {
@@ -131,9 +132,16 @@ function formatDate(iso: string) {
 
 // ── Component ────────────────────────────────────────────────────────────────
 export default function ShowFilesPage() {
+  return (
+    <RequireAuth>
+      <ShowFilesPageInner />
+    </RequireAuth>
+  );
+}
+
+function ShowFilesPageInner() {
   const router = useRouter();
-  const { status: sessionStatus } = useSession();
-  const isAuthenticated = sessionStatus === "authenticated";
+  const { isAuthenticated } = useAuth();
   const [activeId, setActiveId]   = useState("all");
   const [search, setSearch]       = useState("");
   const [shareUrl, setShareUrl]   = useState("");

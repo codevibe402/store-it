@@ -31,7 +31,12 @@ const ACCESS_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'lax' as const,
-  path: '/api',
+  // Must be readable on page navigations (e.g. /dashboard), not just
+  // /api/*: middleware.ts checks for this cookie's presence to gate
+  // protected pages, and a browser never attaches a cookie to a request
+  // outside its Path scope. Scoping this to '/api' would make middleware's
+  // check always see "logged out" on real page loads.
+  path: '/',
   maxAge: 15 * 60,
 };
 

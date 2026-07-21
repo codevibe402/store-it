@@ -1,9 +1,6 @@
 import crypto from "crypto";
-import { GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { ObjectId } from "mongodb";
 import connectDB from "@/adapters/database/mongoose";
-import { s3, BUCKET } from "@/adapters/storage/s3";
 import File from "@/adapters/database/models/File";
 import FileVersion from "@/adapters/database/models/FileVersion";
 import FileShare from "@/adapters/database/models/Fileshare";
@@ -45,25 +42,18 @@ export async function createFileShare(userId: string, fileId: string) {
     return { shareUrl: existing.shareUrl, expiresAt: existing.expiresAt, reused: true as const };
   }
 
-  const isTelegram = file.backend === "telegram";
   const expiresAt = new Date(now.getTime() + SHARE_TTL_MS);
 
-  if (isTelegram) {
-    const token = generateToken();
-    const base = process.env.NEXT_PUBLIC_APP_URL ;
-    const shareUrl = `${base}/api/share/file/${token}`;
-    await FileShare.create({ fileId, filename: file.filename, owner_id: userId, shareUrl, shareToken: token, backend: "telegram", expiresAt });
-    return { shareUrl, expiresAt, reused: false as const };
-  }
-
-  const command = new GetObjectCommand({
-    Bucket: BUCKET,
-    Key: file.storageUrl,
-    ResponseContentDisposition: `inline; filename="${encodeURIComponent(file.filename)}"`,
-    ResponseContentType: file.mimetype,
-  });
-  const shareUrl = await getSignedUrl(s3, command, { expiresIn: SHARE_TTL_SECONDS });
-  await FileShare.create({ fileId, filename: file.filename, owner_id: userId, shareUrl, shareToken: generateToken(), backend: "s3", expiresAt });
+  // Always a same-origin proxy link, never a raw storage URL baked in at
+  // creation time — getSharedFileByToken resolves the file's *current*
+  // version fresh on every access (see below), so this link keeps working,
+  // and keeps serving the latest content, across any number of future
+  // version uploads. `backend` is stored for reference only; resolution
+  // never trusts it (a file can change backend between versions).
+  const token = generateToken();
+  const base = process.env.NEXT_PUBLIC_APP_URL;
+  const shareUrl = `${base}/api/share/file/${token}`;
+  await FileShare.create({ fileId, filename: file.filename, owner_id: userId, shareUrl, shareToken: token, backend: file.backend, expiresAt });
   return { shareUrl, expiresAt, reused: false as const };
 }
 
@@ -79,10 +69,6 @@ export async function getSharedFileByToken(token: string, versionId?: string | n
   const share = await FileShare.findOne({ shareToken: token, expiresAt: { $gt: new Date() } }).lean();
   if (!share) throw new ServiceError("Share link not found or expired", 404);
 
-  if (share.backend === "s3") {
-    return { kind: "redirect" as const, url: share.shareUrl as string };
-  }
-
   // deleted: excluded so moving a file to the recycle bin immediately
   // revokes any outstanding share link to it too, instead of leaving it
   // downloadable by anyone with the link until the share row itself expires.
@@ -91,7 +77,14 @@ export async function getSharedFileByToken(token: string, versionId?: string | n
 
   let version;
   if (versionId) {
-    version = await FileVersion.findById(versionId).lean();
+    // Scoped to this share's own file — never a bare findById. An
+    // unscoped lookup would let anyone holding *any* valid share link
+    // read an arbitrary other file's content (any other user's, shared
+    // or not) just by passing a different FileVersion _id as ?versionId=,
+    // since ObjectIds are guessable/enumerable and this route has no
+    // other authorization check.
+    if (!ObjectId.isValid(versionId)) throw new ServiceError("Invalid version id", 400);
+    version = await FileVersion.findOne({ _id: versionId, file_id: file._id }).lean();
   } else if (file.currentVersionId) {
     version = await FileVersion.findById(file.currentVersionId).lean();
   }
@@ -109,7 +102,9 @@ export async function getSharedFileByToken(token: string, versionId?: string | n
     };
   }
 
-  const url = await createS3DownloadUrl(version.storageUrl, file.filename, version.mimetype);
+  // "inline" (not createS3DownloadUrl's own "attachment" default) —
+  // matches what every S3 file share has always opened as.
+  const url = await createS3DownloadUrl(version.storageUrl, file.filename, version.mimetype, "inline");
   return { kind: "redirect" as const, url };
 }
 

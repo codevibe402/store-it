@@ -3,10 +3,11 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSession } from "next-auth/react";
 import { MoreHorizontal, ArrowLeft, FolderPlus, FilePlus } from "lucide-react";
 import { useFolders } from "@/hooks/useFolders";
 import FileUpload from "@/components/ui/fileupload";
+import { useAuth } from "@/components/AuthProvider";
+import RequireAuth from "@/components/RequireAuth";
 
 type FolderType = {
   _id: string;
@@ -17,10 +18,18 @@ type FolderType = {
 };
 
 export default function FolderPage({ params }: { params: Promise<{ id: string }> }) {
+  return (
+    <RequireAuth>
+      <FolderPageInner params={params} />
+    </RequireAuth>
+  );
+}
+
+function FolderPageInner({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
-  const { status: sessionStatus } = useSession();
+  const { isAuthenticated } = useAuth();
   const [folderId, setFolderId] = useState<string | null>(null);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -45,7 +54,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
       const d = await res.json();
       return d.folder;
     },
-    enabled: !!folderId && sessionStatus === "authenticated",
+    enabled: !!folderId && isAuthenticated,
   });
 
   const { data: subfolders = [] } = useQuery<FolderType[]>({
@@ -56,7 +65,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
       const d = await res.json();
       return d.folders || [];
     },
-    enabled: !!folderId && sessionStatus === "authenticated",
+    enabled: !!folderId && isAuthenticated,
   });
 
   const { data: files = [] } = useQuery<{ _id: string; filename: string; size: number; createdAt: string }[]>({
@@ -67,7 +76,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
       const d = await res.json();
       return d.files || [];
     },
-    enabled: !!folderId && sessionStatus === "authenticated",
+    enabled: !!folderId && isAuthenticated,
   });
 
   const folderActions = useFolders(subfolders, folderId);
@@ -103,8 +112,6 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
       setShowNewFolder(false);
     }
   };
-
-  if (sessionStatus !== "authenticated") return null;
 
   return (
     <main className="min-h-screen bg-[linear-gradient(180deg,#0b1220_0%,#111827_100%)] py-8 pl-64 text-slate-100">

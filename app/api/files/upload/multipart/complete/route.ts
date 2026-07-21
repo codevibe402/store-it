@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import mongoose from "mongoose";
 import { getAuthUser } from "@/server/auth/auth";
 import connectDB from "@/adapters/database/mongoose";
 import { s3, BUCKET } from "@/adapters/storage/s3";
 import { CompleteMultipartUploadCommand } from "@aws-sdk/client-s3";
 import File from "@/adapters/database/models/File";
-import FileVersion from "@/adapters/database/models/FileVersion";
-import User from "@/adapters/database/models/User";
+import { findConflictingUploadedFile, mergeAsNewVersion, createInitialVersion } from "@/server/services/versioningService";
 
 export async function POST(req: NextRequest) {
   const user = await getAuthUser();
@@ -57,69 +57,37 @@ export async function POST(req: NextRequest) {
   }
 
   if (file.status !== "uploaded") {
-    const existingByName = file.status === "pending"
-      ? await File.findOne({
-          filename: file.filename,
-          owner_id: file.owner_id,
-          folderId: file.folderId,
-          status: "uploaded",
-          hash: { $ne: file.hash },
-          _id: { $ne: file._id },
-          deleted: { $ne: true },
-        })
-      : null;
+    const content = { backend: "s3" as const, storageUrl: key, hash: file.hash, size: file.size, mimetype: file.mimetype };
+    const extraFileFields = { searchText: file.searchText };
 
-    if (existingByName) {
-      const latestVersion = await FileVersion.findOne({ file_id: existingByName._id })
-        .sort({ version: -1 })
-        .lean();
-      const nextVersion = (latestVersion?.version ?? 1) + 1;
+    const session = await mongoose.startSession();
+    try {
+      let result: { file: InstanceType<typeof File>; version: number; versioned: boolean } | undefined;
 
-      const version = await FileVersion.create({
-        file_id: existingByName._id,
-        version: nextVersion,
-        backend: "s3",
-        storageUrl: key,
-        hash: file.hash,
-        size: file.size,
-        mimetype: file.mimetype,
-        createdBy: file.owner_id,
+      await session.withTransaction(async () => {
+        const existingByName = file.status === "pending"
+          ? await findConflictingUploadedFile({
+              session,
+              filename: file.filename,
+              ownerId: file.owner_id,
+              folderId: file.folderId,
+              hash: file.hash,
+              excludeFileId: file._id,
+            })
+          : null;
+
+        result = existingByName
+          ? await mergeAsNewVersion({ session, existingFile: existingByName, content, createdBy: file.owner_id, extraFileFields, placeholderFileId: file._id })
+          : await createInitialVersion({ session, file, content, createdBy: file.owner_id, extraFileFields });
       });
 
-      const oldSize = existingByName.size ?? 0;
-      existingByName.hash = file.hash;
-      existingByName.mimetype = file.mimetype;
-      existingByName.size = file.size;
-      existingByName.storageUrl = key;
-      existingByName.searchText = file.searchText;
-      existingByName.currentVersionId = version._id;
-      await existingByName.save();
-
-      await User.findByIdAndUpdate(file.owner_id, { $inc: { storageused: file.size - oldSize } });
-
-      await File.deleteOne({ _id: file._id });
-
-      return NextResponse.json({ file: existingByName, version: nextVersion, versioned: true }, { status: 200 });
+      return NextResponse.json(
+        result!.versioned ? { file: result!.file, version: result!.version, versioned: true } : { file: result!.file },
+        { status: 200 }
+      );
+    } finally {
+      await session.endSession();
     }
-
-    file.status = "uploaded";
-    await file.save();
-
-    const version = await FileVersion.create({
-      file_id: file._id,
-      version: 1,
-      backend: "s3",
-      storageUrl: key,
-      hash: file.hash,
-      size: file.size,
-      mimetype: file.mimetype,
-      createdBy: file.owner_id,
-    });
-
-    file.currentVersionId = version._id;
-    await file.save();
-
-    await User.findByIdAndUpdate(file.owner_id, { $inc: { storageused: file.size } });
   }
 
   return NextResponse.json({ file }, { status: 200 });

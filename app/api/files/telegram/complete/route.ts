@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import mongoose from "mongoose";
 import { getAuthUser } from "@/server/auth/auth";
 import connectDB from "@/adapters/database/mongoose";
 import File from "@/adapters/database/models/File";
-import FileVersion from "@/adapters/database/models/FileVersion";
 import TelegramChunk from "@/adapters/database/models/TelegramChunk";
-import User from "@/adapters/database/models/User";
-import { deleteMessage } from "@/adapters/storage/telegram";
+import {
+  findConflictingUploadedFile,
+  mergeAsNewVersion,
+  createInitialVersion,
+  wouldConflictServerEncryptionKey,
+} from "@/server/services/versioningService";
 
 export async function POST(req: NextRequest) {
   const user = await getAuthUser();
@@ -51,29 +55,48 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ file, alreadyUploaded: true });
   }
 
-  file.status = "uploaded";
-  await file.save();
+  const content = { backend: "telegram" as const, storageUrl: file.storageUrl, hash: file.hash, size: file.size, mimetype: file.mimetype };
+  // Propagated onto the winning File doc so it correctly reflects *this*
+  // (the newly-finished) upload's encryption state, whether or not it ends
+  // up merging into an existing file.
+  const extraFileFields = { encryptionMode: file.encryptionMode, encryptionKey: file.encryptionKey, encryptionIv: file.encryptionIv };
 
-  await User.findByIdAndUpdate(file.owner_id, { $inc: { storageused: file.size } });
+  const session = await mongoose.startSession();
+  try {
+    let result: { file: InstanceType<typeof File>; version: number; versionId: string; versioned: boolean } | undefined;
 
-  const version = await FileVersion.create({
-    file_id: file._id,
-    version: 1,
-    backend: "telegram",
-    storageUrl: file.storageUrl,
-    hash: file.hash,
-    size: file.size,
-    mimetype: file.mimetype,
-    createdBy: file.owner_id,
-  });
+    await session.withTransaction(async () => {
+      const existingByName = await findConflictingUploadedFile({
+        session,
+        filename: file.filename,
+        ownerId: file.owner_id,
+        folderId: file.folderId,
+        hash: file.hash,
+        excludeFileId: file._id,
+      });
 
-  file.currentVersionId = version._id;
-  await file.save();
+      const canMerge = existingByName && !wouldConflictServerEncryptionKey(existingByName, file.encryptionKey);
 
-  await TelegramChunk.updateMany(
-    { fileId: file._id },
-    { $set: { versionId: version._id } },
-  );
+      if (existingByName && canMerge) {
+        result = await mergeAsNewVersion({
+          session,
+          existingFile: existingByName,
+          content,
+          createdBy: file.owner_id,
+          extraFileFields,
+          placeholderFileId: file._id,
+        });
+      } else {
+        result = await createInitialVersion({ session, file, content, createdBy: file.owner_id, extraFileFields });
+        await TelegramChunk.updateMany(
+          { fileId: file._id },
+          { $set: { versionId: result.versionId } }
+        ).session(session);
+      }
+    });
 
-  return NextResponse.json({ file, versionId: version._id.toString() });
+    return NextResponse.json({ file: result!.file, versionId: result!.versionId, version: result!.version, versioned: result!.versioned });
+  } finally {
+    await session.endSession();
+  }
 }

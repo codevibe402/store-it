@@ -79,7 +79,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "File not found" }, { status: 404 });
   }
 
-  const version = await FileVersion.findOne({ file_id: id, storage_url: storageUrl }).lean();
+  const version = await FileVersion.findOne({ file_id: id, storageUrl }).lean();
   if (!version) {
     return NextResponse.json({ error: "Version not found" }, { status: 404 });
   }

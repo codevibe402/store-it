@@ -2,8 +2,9 @@
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSession } from "next-auth/react";
 import { apiClient } from "@/client/lib/apiClient";
+import { useAuth } from "@/components/AuthProvider";
+import RequireAuth from "@/components/RequireAuth";
 
 type FileType = {
   _id: string;
@@ -41,9 +42,16 @@ function getMimeIcon(mime: string): string {
 }
 
 export default function AllFilesPage() {
+  return (
+    <RequireAuth>
+      <AllFilesPageInner />
+    </RequireAuth>
+  );
+}
+
+function AllFilesPageInner() {
   const router = useRouter();
-  const { status: sessionStatus } = useSession();
-  const isAuthenticated = sessionStatus === "authenticated";
+  const { isAuthenticated } = useAuth();
   const [search, setSearch] = useState("");
 
   const { data: files = [], isLoading } = useQuery<FileType[]>({

@@ -2,13 +2,13 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSession } from "next-auth/react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { CloudUpload, FileText, LoaderCircle, CheckCircle, XCircle, AlertCircle, RotateCcw } from "lucide-react";
 import { useUpload, UploadEntry } from "@/hooks/useUpload";
 import { useResume } from "@/hooks/useResume";
 import { getAllQueueItems, removeQueueItem } from "@/client/lib/uploadQueueDB";
+import { useAuth } from "@/components/AuthProvider";
 
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 
@@ -43,8 +43,9 @@ export interface FileUploadProps {
 }
 
 export default function FileUpload({ currentFolderId = null, onUploadComplete }: FileUploadProps) {
-  const { status: sessionStatus } = useSession();
-  const isAuthenticated = sessionStatus === "authenticated";
+  // See the matching comment in ArchiveShell.tsx — the app's own JWT
+  // session, not NextAuth's useSession(), is what actually gates access.
+  const { isAuthenticated } = useAuth();
 
   const [currentFolderIdState, setCurrentFolderIdState] = useState<string | null>(currentFolderId);
 

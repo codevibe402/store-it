@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react"
 import { signIn } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { Button } from "./ui/button"
+import { useAuth } from "./AuthProvider"
 
 export function TelegramLoginButton() {
   const router = useRouter()
+  const { exchangeSession } = useAuth()
   const containerRef = useRef<HTMLDivElement>(null)
   const [botUsername, setBotUsername] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -42,8 +44,12 @@ export function TelegramLoginButton() {
         // Explicit continuation of this sign-in, same pattern as
         // credentials login (Authform.tsx) — AuthProvider's ambient
         // bootstrap only refreshes an *existing* app session, it never
-        // mints one from NextAuth session state on its own.
-        await fetch("/api/auth/exchange", { method: "POST" })
+        // mints one from NextAuth session state on its own. Must go
+        // through exchangeSession() (not a disconnected raw fetch) so its
+        // setUser(...) actually updates useAuth()'s client-side state —
+        // otherwise RequireAuth reads isAuthenticated as still false and
+        // bounces straight back to /sign_in.
+        await exchangeSession()
         router.push("/dashboard")
       }
     }
@@ -60,7 +66,7 @@ export function TelegramLoginButton() {
     return () => {
       delete (window as any).onTelegramAuth
     }
-  }, [botUsername, router])
+  }, [botUsername, router, exchangeSession])
 
   if (loading) {
     return (

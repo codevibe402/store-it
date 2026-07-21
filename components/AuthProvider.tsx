@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
-import { useSession } from 'next-auth/react';
+import { useSession, signOut } from 'next-auth/react';
 import { getDeviceDEK } from '@/client/lib/dekStore';
 import { importDEK } from '@/client/lib/dek';
 import { setSessionDEK, clearSessionDEK, base64ToBuffer } from '@/hooks/useFileEncryption';
@@ -94,7 +94,18 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     loggingOutRef.current = true;
-    await fetch('/api/auth/logout', { method: 'POST' });
+    // Clears both session systems from a single call site — a caller that
+    // only cleared the app's own JWT (via /api/auth/logout) and forgot
+    // NextAuth's signOut() would leave a real, valid NextAuth session
+    // sitting in the browser, which is exactly the "two systems disagree"
+    // shape this app has already been bitten by once (see
+    // SESSION_EXCHANGE_VULNERABILITY.md). Doing both here means every
+    // future logout entry point gets this for free instead of having to
+    // remember to pair the calls itself.
+    await Promise.all([
+      fetch('/api/auth/logout', { method: 'POST' }),
+      signOut({ redirect: false }),
+    ]);
     setUser(null);
     clearSessionDEK();
     setDekModal(null);

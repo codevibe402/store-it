@@ -43,6 +43,7 @@ export function useFiles(files: FileType[], folders: FolderType[]) {
   const [versionTarget, setVersionTarget] = useState<FileType | null>(null);
   const [versions, setVersions] = useState<any[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
+  const [restoringVersionId, setRestoringVersionId] = useState<string | null>(null);
   // File sharing only — folder sharing has its own richer state/actions in
   // hooks/useFolderShare.ts (people + role management, links, revoke).
   const [fileShareTarget, setFileShareTarget] = useState<FileType | null>(null);
@@ -223,6 +224,29 @@ export function useFiles(files: FileType[], folders: FolderType[]) {
     window.open(url, "_blank");
   };
 
+  const restoreVersion = async (version: { id: string }) => {
+    const file = versionTarget;
+    if (!file) return;
+    setRestoringVersionId(version.id);
+    try {
+      const res = await fetch(`/api/files/${file._id}/versions/${version.id}/restore`, { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to restore version");
+      }
+      toast.success(`Restored an earlier version of ${file.filename}`);
+      // Refresh the dialog's own list (new "current" flag, new row on top)
+      // and the dashboard (the file's size/type shown elsewhere may have
+      // changed to match the restored content).
+      await openVersions(file);
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to restore version");
+    } finally {
+      setRestoringVersionId(null);
+    }
+  };
+
   const deleteFile = async (fileId: string) => {
     // Optimistic: remove instantly from the UI
     queryClient.setQueryData<{ files: FileType[]; folders: FolderType[]; pendingFiles: FileType[] }>(["dashboard"], (old) => {
@@ -270,6 +294,7 @@ export function useFiles(files: FileType[], folders: FolderType[]) {
     versions,
     versionsLoading,
     setVersionsLoading,
+    restoringVersionId,
     fileShareTarget,
     setFileShareTarget,
     fileShareUrl,
@@ -284,6 +309,7 @@ export function useFiles(files: FileType[], folders: FolderType[]) {
     renameFile,
     openVersions,
     openVersionUrl,
+    restoreVersion,
     deleteFile,
     deleteFolder,
   };

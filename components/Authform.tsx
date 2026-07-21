@@ -52,7 +52,7 @@ const signUpSchema = z.object({
 
 const Authform = () => {
     const router = useRouter()
-  const { isAuthenticated, requestDekRecovery } = useAuth()
+  const { isAuthenticated, requestDekRecovery, exchangeSession } = useAuth()
   const [type, setType] = React.useState<FormType>("sign-in")
   const [showForgotPassword, setShowForgotPassword] = React.useState(false)
   const [recoveryArmed, setRecoveryArmed] = React.useState(false)
@@ -116,8 +116,13 @@ async function onSubmit(data: FormValues) {
       return
     }
 
-    // Exchange next-auth session for access + refresh tokens
-    await fetch("/api/auth/exchange", { method: "POST" })
+    // Exchange next-auth session for access + refresh tokens. Must go
+    // through AuthProvider's exchangeSession() (not a disconnected raw
+    // fetch) so its setUser(...) actually updates the app's client-side
+    // session state — a bare fetch sets the cookies server-side but leaves
+    // useAuth().isAuthenticated false, which RequireAuth immediately reads
+    // as "not logged in" and bounces straight back to /sign_in.
+    await exchangeSession()
 
     toast.success("Logged in successfully!")
     router.push("/dashboard")
