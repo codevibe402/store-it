@@ -149,6 +149,18 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // Google's OAuth redirect lands here with a one-time authExchange=1
+      // marker still in the URL (stripped by the effect below, which runs
+      // after this one on the same mount). Defer to that effect entirely
+      // when it's present — otherwise fetchUser() (POST /api/auth/refresh)
+      // fails instantly on a fresh login (no refresh_token cookie exists
+      // yet) and flips isReady true with user still null, which races
+      // RequireAuth into bouncing to /sign_in before the marker's slower
+      // exchangeSession() (getServerSession + a DB lookup) ever resolves.
+      if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('authExchange') === '1') {
+        return;
+      }
+
       // Only ever refreshes an *existing* app session from its own
       // refresh_token — never mints a new one from whatever NextAuth
       // session happens to be sitting in the browser. exchangeSession() is
@@ -179,7 +191,14 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     const newSearch = params.toString();
     window.history.replaceState({}, '', window.location.pathname + (newSearch ? `?${newSearch}` : ''));
 
-    void (async () => { await exchangeSession(); })();
+    // isReady is flipped here, not by the init effect above (which bails
+    // out when this marker is present) — so RequireAuth never sees
+    // isReady=true before this exchange has actually had a chance to
+    // succeed or fail.
+    void (async () => {
+      await exchangeSession();
+      setIsReady(true);
+    })();
   }, [exempt, exchangeSession]);
 
   // Bootstrap the session DEK once a user is authenticated — works the same
