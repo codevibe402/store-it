@@ -200,26 +200,35 @@ export async function createInitialVersion(params: CreateInitialParams): Promise
     { session }
   );
 
-  // findByIdAndUpdate, not file.save() — see the matching comment in
-  // mergeAsNewVersion: a withTransaction retry desyncs Mongoose's
-  // dirty-path tracking on a pre-fetched document, silently dropping the
-  // update on the retried attempt even though the transaction reports success.
-  const updatedFile = await File.findByIdAndUpdate(
-    file._id,
-    {
-      $set: {
-        status: "uploaded",
-        hash: content.hash,
-        mimetype: content.mimetype,
-        size: content.size,
-        storageUrl: content.storageUrl,
-        backend: content.backend,
-        currentVersionId: version._id,
-        ...(extraFileFields ?? {}),
-      },
-    },
-    { session, new: true }
-  );
+  const fields = {
+    status: "uploaded",
+    hash: content.hash,
+    mimetype: content.mimetype,
+    size: content.size,
+    storageUrl: content.storageUrl,
+    backend: content.backend,
+    currentVersionId: version._id,
+    ...(extraFileFields ?? {}),
+  };
+
+  // Two distinct callers, two distinct safe strategies:
+  // - The direct S3 upload route (no placeholder step) passes a brand-new
+  //   `new File(...)` that's never been persisted — constructed fresh
+  //   inside the caller's withTransaction callback on every attempt, so
+  //   .save() is safe (each retry gets its own untouched instance, nothing
+  //   carried over). It must be saved here at all — findByIdAndUpdate
+  //   against an _id nothing in the DB has yet would silently match zero
+  //   documents and return null.
+  // - Multipart/Telegram completion pass an existing placeholder, fetched
+  //   once *before* the transaction started and reused by reference across
+  //   retries. For that one, findByIdAndUpdate (not .save()) is required —
+  //   see the matching comment in mergeAsNewVersion: a withTransaction
+  //   retry desyncs Mongoose's dirty-path tracking on a pre-fetched
+  //   document, silently dropping the update on the retried attempt even
+  //   though the transaction reports success.
+  const updatedFile = file.isNew
+    ? await Object.assign(file, fields).save({ session })
+    : await File.findByIdAndUpdate(file._id, { $set: fields }, { session, new: true });
 
   await User.findByIdAndUpdate(
     updatedFile!.owner_id,

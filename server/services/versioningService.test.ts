@@ -260,6 +260,40 @@ describe("createInitialVersion", () => {
     const updatedOwner = await User.findById(owner._id).lean();
     expect(updatedOwner?.storageused).toBe(500);
   });
+
+  it("persists a brand-new, not-yet-saved File document (the direct S3 upload route's usage — no placeholder pre-created)", async () => {
+    const owner = await seedOwner();
+    const freshFile = new File({
+      filename: "brand-new.pdf",
+      hash: "hash-fresh",
+      owner_email: owner.email,
+      owner_id: owner._id,
+      folders_id: null,
+      folderId: null,
+      status: "pending",
+    });
+    expect(freshFile.isNew).toBe(true);
+
+    const result = await withSession((session) =>
+      createInitialVersion({
+        session,
+        file: freshFile,
+        content: { backend: "s3", storageUrl: "uploads/owner/brand-new.pdf", hash: "hash-fresh", size: 700, mimetype: "application/pdf" },
+        createdBy: owner._id,
+      })
+    );
+
+    expect(result.version).toBe(1);
+
+    const persisted = await File.findById(freshFile._id).lean();
+    expect(persisted).not.toBeNull();
+    expect(persisted?.status).toBe("uploaded");
+    expect(persisted?.storageUrl).toBe("uploads/owner/brand-new.pdf");
+    expect(persisted?.currentVersionId?.toString()).toBe(result.versionId);
+
+    const updatedOwner = await User.findById(owner._id).lean();
+    expect(updatedOwner?.storageused).toBe(700);
+  });
 });
 
 describe("restoreVersion", () => {
