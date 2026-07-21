@@ -45,6 +45,13 @@ type UploadMeta = {
 
 const SMALL_FILE_LIMIT = 10 * 1024 * 1024;
 
+// Number of Telegram chunks kept in flight at once. Uploads used to send
+// one chunk at a time — unlike the page-refresh resume path in
+// client/lib/telegramWorker.ts, which already ran 6 concurrent workers —
+// so total wall-clock time was chunk-count times per-chunk latency with
+// zero overlap. Matches that already-proven worker count.
+const CHUNK_CONCURRENCY = 6;
+
 function bufferToBase64(buf: Uint8Array): string {
   let binary = "";
   for (let i = 0; i < buf.length; i++) binary += String.fromCharCode(buf[i]);
@@ -115,6 +122,130 @@ export function useUpload(currentFolderId: string | null) {
       prev.map((u) => (u.id === id && u.status === "uploading" ? { ...u, status: "paused" as const } : u))
     );
   }, []);
+
+  // Shared by both the initial upload (handleFile) and the in-memory resume
+  // path (resumeSingleUpload) — previously each had its own near-duplicate,
+  // strictly sequential copy of this loop; unifying means both get the same
+  // concurrency and the same fix at once instead of drifting apart (see
+  // SESSION_EXCHANGE_VULNERABILITY.md §8 for why two independent copies of
+  // the same effect is a recurring failure shape in this codebase).
+  const uploadChunks = useCallback(async (
+    id: string,
+    file: File,
+    fileId: string,
+    totalChunks: number,
+    chunkSize: number,
+    cryptoKey: CryptoKey | null,
+    controller: AbortController,
+    existingUploadedBytes: number,
+    existingUploadedIndexes: Set<number>,
+  ) => {
+    let uploadedBytes = existingUploadedBytes;
+    const nextIndex = { current: 0 };
+    // Set by the first worker that hits a terminal (non-retryable) chunk
+    // failure, so sibling workers stop picking up *new* chunks. Deliberately
+    // not the shared `controller` — aborting that would make
+    // controller.signal.aborted true, and the caller's catch block checks
+    // that (meaning "this was a genuine cancel") *before* it ever checks
+    // canFallbackToS3, which would silently turn a fallback-eligible
+    // failure into a silent cancel instead. Chunks already in flight on
+    // other workers are left to finish naturally, not force-aborted.
+    const stopped = { current: false };
+    let terminalError: unknown = null;
+
+    const uploadOneChunk = async (i: number) => {
+      const start = i * chunkSize;
+      const end = Math.min(start + chunkSize, file.size);
+      const chunkBlob = file.slice(start, end);
+      const chunkBuf = new Uint8Array(await chunkBlob.arrayBuffer());
+
+      let dataToUpload: Blob;
+      let chunkHash: string;
+      let nonce: string | undefined;
+
+      if (cryptoKey) {
+        const { ciphertext, nonce: iv } = await encryptChunk(chunkBuf, cryptoKey);
+        chunkHash = await crypto.subtle.digest("SHA-256", ciphertext as unknown as BufferSource).then(h => {
+          const arr = new Uint8Array(h);
+          return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+        });
+        nonce = bufferToBase64(iv);
+        dataToUpload = new Blob([ciphertext as unknown as BlobPart], { type: "application/octet-stream" });
+      } else {
+        chunkHash = await crypto.subtle.digest("SHA-256", chunkBuf as unknown as BufferSource).then(h => {
+          const arr = new Uint8Array(h);
+          return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+        });
+        dataToUpload = chunkBlob;
+      }
+
+      const chunkForm = new FormData();
+      chunkForm.append("fileId", fileId);
+      chunkForm.append("chunkIndex", String(i));
+      chunkForm.append("hash", chunkHash);
+      chunkForm.append("chunk", dataToUpload);
+      if (nonce) chunkForm.append("nonce", nonce);
+      chunkForm.append("useEncryption", cryptoKey ? "false" : "true");
+
+      let success = false;
+      let sawCanFallbackToS3 = false;
+      for (let attempt = 0; attempt < 3 && !success; attempt++) {
+        if (cancelRef.current || pauseRef.current || pausedIds.current.has(id) || controller.signal.aborted) break;
+        try {
+          const chunkRes = await fetch("/api/files/telegram/chunk", {
+            method: "POST",
+            body: chunkForm,
+            signal: controller.signal,
+          });
+          if (!chunkRes.ok) {
+            const errBody = await chunkRes.json().catch(() => ({}));
+            // Without Object.assign here, the canFallbackToS3 flag never
+            // survives being re-thrown, silently breaking the S3-fallback
+            // feature entirely.
+            if (errBody.canFallbackToS3) throw Object.assign(new Error("Telegram upload failed; fallback to S3"), { canFallbackToS3: true });
+            if (attempt >= 2) throw new Error(`Chunk ${i} failed`);
+          } else {
+            success = true;
+            uploadedBytes += chunkBlob.size;
+            updateUpload(id, { progress: Math.round((uploadedBytes / file.size) * 100) });
+          }
+        } catch (err: unknown) {
+          if (cancelRef.current || pauseRef.current || pausedIds.current.has(id) || controller.signal.aborted) break;
+          const e = err as Error & { isCancelled?: boolean; canFallbackToS3?: boolean };
+          if (e.isCancelled) break;
+          if (e.canFallbackToS3) sawCanFallbackToS3 = true;
+          if (e.canFallbackToS3 && attempt >= 2) throw e;
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        }
+      }
+      if (!success && !cancelRef.current && !pauseRef.current && !pausedIds.current.has(id) && !controller.signal.aborted) {
+        throw Object.assign(new Error(`Chunk ${i} failed after 3 attempts`), { canFallbackToS3: sawCanFallbackToS3 });
+      }
+    };
+
+    const worker = async () => {
+      while (true) {
+        if (stopped.current || cancelRef.current || pauseRef.current || pausedIds.current.has(id) || controller.signal.aborted) return;
+        const i = nextIndex.current++;
+        if (i >= totalChunks) return;
+        if (existingUploadedIndexes.has(i)) continue;
+        try {
+          await uploadOneChunk(i);
+        } catch (err) {
+          stopped.current = true;
+          terminalError = err;
+          return;
+        }
+      }
+    };
+
+    const workerCount = Math.min(CHUNK_CONCURRENCY, totalChunks);
+    await Promise.all(Array.from({ length: workerCount }, worker));
+
+    if (terminalError) throw terminalError;
+
+    return uploadedBytes;
+  }, [updateUpload]);
 
   // Runs when Telegram signals canFallbackToS3 (3 failed chunk attempts).
   // The server-side fallback route always discards whatever made it to
@@ -312,86 +443,7 @@ export function useUpload(currentFolderId: string | null) {
       // per-file salt/derivation needed.
       const cryptoKey = getSessionDEK();
 
-      for (let i = 0; i < totalChunks; i++) {
-        if (cancelRef.current || pausedIds.current.has(id) || controller.signal.aborted) break;
-
-        if (uploadedIndexes.has(i)) continue;
-
-        const start = i * chunkSize;
-        const end = Math.min(start + chunkSize, file.size);
-        const chunkBlob = file.slice(start, end);
-        const chunkBuf = new Uint8Array(await chunkBlob.arrayBuffer());
-
-        let dataToUpload: Blob;
-        let chunkHash: string;
-        let nonce: string | undefined;
-
-        if (cryptoKey) {
-          const { ciphertext, nonce: iv } = await encryptChunk(chunkBuf, cryptoKey);
-          chunkHash = await crypto.subtle.digest("SHA-256", ciphertext as unknown as BufferSource).then(h => {
-            const arr = new Uint8Array(h);
-            return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
-          });
-          nonce = bufferToBase64(iv);
-          dataToUpload = new Blob([ciphertext as unknown as BlobPart], { type: "application/octet-stream" });
-        } else {
-          chunkHash = await crypto.subtle.digest("SHA-256", chunkBuf as unknown as BufferSource).then(h => {
-            const arr = new Uint8Array(h);
-            return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
-          });
-          dataToUpload = chunkBlob;
-        }
-
-        const chunkForm = new FormData();
-        chunkForm.append("fileId", fileId);
-        chunkForm.append("chunkIndex", String(i));
-        chunkForm.append("hash", chunkHash);
-        chunkForm.append("chunk", dataToUpload);
-        if (nonce) chunkForm.append("nonce", nonce);
-        chunkForm.append("useEncryption", cryptoKey ? "false" : "true");
-
-        let success = false;
-        let sawCanFallbackToS3 = false;
-        for (let attempt = 0; attempt < 3 && !success; attempt++) {
-          if (cancelRef.current || pausedIds.current.has(id) || controller.signal.aborted) break;
-          try {
-            const chunkRes = await fetch("/api/files/telegram/chunk", {
-              method: "POST",
-              body: chunkForm,
-              signal: controller.signal,
-            });
-            if (!chunkRes.ok) {
-              const errBody = await chunkRes.json().catch(() => ({}));
-              // The `canFallbackToS3: true` flag must survive on the thrown
-              // error itself — without Object.assign here, the check right
-              // below (`e.canFallbackToS3`) and the one after the loop can
-              // never see it, and the server's "give up on Telegram" signal
-              // is silently lost. This previously made the entire S3-fallback
-              // feature unreachable: the server would say canFallbackToS3,
-              // and the client would just retry Telegram 2 more times and
-              // then fail with a plain, unflagged error.
-              if (errBody.canFallbackToS3) throw Object.assign(new Error("Telegram upload failed; fallback to S3"), { canFallbackToS3: true });
-              if (attempt >= 2) throw new Error(`Chunk ${i} failed`);
-            } else {
-              success = true;
-              uploadedBytes += chunkBlob.size;
-              updateUpload(id, { progress: Math.round((uploadedBytes / file.size) * 100) });
-            }
-          } catch (err: unknown) {
-            if (cancelRef.current || pausedIds.current.has(id) || controller.signal.aborted) break;
-            const e = err as Error & { isCancelled?: boolean; canFallbackToS3?: boolean };
-            if (e.isCancelled) break;
-            if (e.canFallbackToS3) sawCanFallbackToS3 = true;
-            if (e.canFallbackToS3 && attempt >= 2) throw e;
-            if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
-          }
-        }
-        if (!success && !cancelRef.current && !pausedIds.current.has(id) && !controller.signal.aborted) {
-          throw Object.assign(new Error(`Chunk ${i} failed after 3 attempts`), { canFallbackToS3: sawCanFallbackToS3 });
-        }
-      }
-
-      abortControllers.current.delete(id);
+      uploadedBytes = await uploadChunks(id, file, fileId, totalChunks, chunkSize, cryptoKey, controller, uploadedBytes, uploadedIndexes);
 
       abortControllers.current.delete(id);
 
@@ -464,98 +516,7 @@ export function useUpload(currentFolderId: string | null) {
       abortControllers.current.delete(id);
       updateUpload(id, { status: "error", error: e.message || "Upload failed" });
     }
-  }, [queryClient, updateUpload, currentFolderId, fallbackToS3]);
-
-  const uploadChunks = useCallback(async (
-    id: string,
-    file: File,
-    fileId: string,
-    totalChunks: number,
-    chunkSize: number,
-    cryptoKey: CryptoKey | null,
-    controller: AbortController,
-    existingUploadedBytes: number,
-    existingUploadedIndexes: Set<number>,
-  ) => {
-    let uploadedBytes = existingUploadedBytes;
-
-    for (let i = 0; i < totalChunks; i++) {
-      if (cancelRef.current || pauseRef.current || pausedIds.current.has(id) || controller.signal.aborted) break;
-
-      if (existingUploadedIndexes.has(i)) continue;
-
-      const start = i * chunkSize;
-      const end = Math.min(start + chunkSize, file.size);
-      const chunkBlob = file.slice(start, end);
-      const chunkBuf = new Uint8Array(await chunkBlob.arrayBuffer());
-
-      let dataToUpload: Blob;
-      let chunkHash: string;
-      let nonce: string | undefined;
-
-      if (cryptoKey) {
-        const { ciphertext, nonce: iv } = await encryptChunk(chunkBuf, cryptoKey);
-        chunkHash = await crypto.subtle.digest("SHA-256", ciphertext as unknown as BufferSource).then(h => {
-          const arr = new Uint8Array(h);
-          return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
-        });
-        nonce = bufferToBase64(iv);
-        dataToUpload = new Blob([ciphertext as unknown as BlobPart], { type: "application/octet-stream" });
-      } else {
-        chunkHash = await crypto.subtle.digest("SHA-256", chunkBuf as unknown as BufferSource).then(h => {
-          const arr = new Uint8Array(h);
-          return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
-        });
-        dataToUpload = chunkBlob;
-      }
-
-      const chunkForm = new FormData();
-      chunkForm.append("fileId", fileId);
-      chunkForm.append("chunkIndex", String(i));
-      chunkForm.append("hash", chunkHash);
-      chunkForm.append("chunk", dataToUpload);
-      if (nonce) chunkForm.append("nonce", nonce);
-      chunkForm.append("useEncryption", cryptoKey ? "false" : "true");
-
-      let success = false;
-      let sawCanFallbackToS3 = false;
-      for (let attempt = 0; attempt < 3 && !success; attempt++) {
-        if (cancelRef.current || pauseRef.current || pausedIds.current.has(id) || controller.signal.aborted) break;
-        try {
-          const chunkRes = await fetch("/api/files/telegram/chunk", {
-            method: "POST",
-            body: chunkForm,
-            signal: controller.signal,
-          });
-          if (!chunkRes.ok) {
-            const errBody = await chunkRes.json().catch(() => ({}));
-            // See the matching comment in resumeSingleUpload's copy of this
-            // loop: without Object.assign, the canFallbackToS3 flag never
-            // survives being re-thrown, silently breaking the S3-fallback
-            // feature entirely.
-            if (errBody.canFallbackToS3) throw Object.assign(new Error("Telegram upload failed; fallback to S3"), { canFallbackToS3: true });
-            if (attempt >= 2) throw new Error(`Chunk ${i} failed`);
-          } else {
-            success = true;
-            uploadedBytes += chunkBlob.size;
-            updateUpload(id, { progress: Math.round((uploadedBytes / file.size) * 100) });
-          }
-        } catch (err: unknown) {
-          if (cancelRef.current || pauseRef.current || pausedIds.current.has(id) || controller.signal.aborted) break;
-          const e = err as Error & { isCancelled?: boolean; canFallbackToS3?: boolean };
-          if (e.isCancelled) break;
-          if (e.canFallbackToS3) sawCanFallbackToS3 = true;
-          if (e.canFallbackToS3 && attempt >= 2) throw e;
-          if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
-        }
-      }
-      if (!success && !cancelRef.current && !pauseRef.current && !pausedIds.current.has(id) && !controller.signal.aborted) {
-        throw Object.assign(new Error(`Chunk ${i} failed after 3 attempts`), { canFallbackToS3: sawCanFallbackToS3 });
-      }
-    }
-
-    return uploadedBytes;
-  }, [updateUpload]);
+  }, [queryClient, updateUpload, currentFolderId, fallbackToS3, uploadChunks]);
 
   const removeFromQueue = useCallback(async (id: string) => {
     await removeQueueItem(id).catch(() => {});

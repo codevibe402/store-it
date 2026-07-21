@@ -189,3 +189,222 @@ system?"**
   `SESSION_EXCHANGE_VULNERABILITY.md` §7 (which rule closes which category,
   and why) is good material for a "how do you think about authentication
   architecture in general" follow-up.
+
+---
+---
+
+# Interview story: the slow large-file upload (measuring before fixing)
+
+A second, unrelated story from the same app — same file-storage product,
+different subsystem (the large-file upload pipeline, not auth). Included
+here as a second "tell me about a bug" answer with a different shape: this
+one is a performance investigation, not a correctness bug, and the arc is
+about *proving where the time goes* before touching any code, not about a
+security implication.
+
+---
+
+## The 30-second version
+
+> Large-file uploads in this app get split into 4MB chunks and sent to a
+> Telegram-backed storage layer, one chunk at a time. Uploads over roughly
+> 10MB felt slow, and a couple of them outright failed with "chunk failed
+> after 3 attempts." Before changing anything, I measured: I audited the
+> upload endpoint for computational bottlenecks (found none — no slow
+> crypto, no expensive DB lookups), then measured the actual chunk request
+> in the browser's network panel. Client-side overhead was negligible —
+> tens of milliseconds. The request was spending 23-24 seconds sitting in
+> "waiting for server response" before getting a success back — over 99%
+> of the total time. That number told me exactly what to fix: not the
+> client, not the network, but the fact that the client was only ever
+> sending one of these 24-second requests at a time, with zero overlap.
+> The app already had a proven 6-way-concurrent uploader for a different
+> code path (resuming after a page refresh) that had just never been wired
+> into the primary "start a new upload" path. Unifying them cut wall-clock
+> upload time by roughly the concurrency factor, without needing to make
+> any single request faster.
+
+---
+
+## The full story (STAR)
+
+### Situation
+
+Uploading a file larger than ~10MB in this app takes a different path than
+a small file: instead of one direct upload, the file is split into 4MB
+chunks and each chunk is POSTed individually to a Telegram-backed storage
+endpoint, then reassembled server-side. Users reported large uploads
+feeling slow, and separately, some uploads were failing outright with a
+generic "chunk failed after 3 attempts" error.
+
+### Task
+
+Two distinct things tangled together in one report: an outright failure
+(worth root-causing on its own — it turned out to be a separate, unrelated
+bug, an auth token silently expiring mid-session with nothing refreshing
+it) and a *performance* complaint, which is squishier — "slow" needs a
+number before it can be fixed. My task on the performance side specifically
+was to find out **where** the time was actually going, because chunked
+upload pipelines have several candidate bottlenecks that all produce the
+same user-visible symptom: client-side compute (hashing, encryption),
+network transfer, or backend processing — and each one implies a
+completely different fix.
+
+### Action
+
+I didn't start by changing code. I started by ruling things out, in order
+of how cheap they were to check:
+
+- **Audited the endpoint itself for computational cost.** Read the whole
+  request path line by line: auth check, a couple of indexed single-document
+  database lookups, a permission check that short-circuits immediately for
+  the common case (uploading your own file), and — for the one encryption
+  mode that does server-side work — a single AES-GCM cipher call over 4MB,
+  which is a low-single-digit-millisecond operation, not something that
+  produces seconds of latency. Nothing in the code itself could plausibly
+  produce a multi-second delay on its own.
+- **Reproduced it directly against the real running server**, not a
+  synthetic guess — scripted an actual authenticated upload (login, init,
+  send real chunks) and confirmed the endpoint completes fast under a
+  clean, low-load request. That ruled out "the code path is just broken"
+  as an explanation for consistently slow requests.
+- **Measured the real thing in the browser's network panel** on an actual
+  slow upload, and broke a single chunk request down by phase instead of
+  looking at one total number:
+  - **Connection setup: under 6ms.** Not a networking/TLS-negotiation
+    problem.
+  - **Sending the request body (client → server): 50-75ms** for a 4MB
+    chunk. Negligible — ruled out client-side compute (hashing, optional
+    encryption) and upload bandwidth as the bottleneck.
+  - **Waiting for server response: 23-24 seconds.** This is the entire
+    story. Whatever the server does between "received the chunk" and
+    "sent back success" is where essentially all the time goes.
+  - **Content download (the response itself): under 1ms.** The response
+    body is tiny (a JSON acknowledgement) — nothing there either.
+  - Total: roughly 24 seconds per chunk, **over 99% of it server-side
+    processing time**, not network, not the client.
+- That number reframed the whole problem. A slow *chunk* isn't
+  automatically a slow *upload* — it only is if chunks are sent one at a
+  time with nothing overlapping. So I checked exactly that, and found the
+  real bug: the primary upload path sent chunks strictly sequentially,
+  awaiting each one fully before starting the next. Meanwhile, a
+  *different* code path in the same codebase — resuming an upload after a
+  page refresh — already ran six chunks concurrently, a pattern that had
+  clearly been built and worked, just never applied to the common case of
+  starting a brand-new upload. Total wall-clock time for the sequential
+  path was therefore chunk-count times 24 seconds, with zero overlap to
+  hide it.
+- I also added two smaller, evidence-driven fixes discovered along the
+  way: the retry logic was ignoring the storage provider's own
+  rate-limit signal (a "retry after N seconds" value on a 429 response),
+  always waiting a fixed guess instead — now it respects the real value,
+  capped so a single request can't block indefinitely if that number is
+  unreasonably large. And I left the phase-by-phase timing breakdown
+  in as permanent server-side logging, specifically so the *next* "why is
+  this slow" question comes with a number instead of another round of
+  guessing.
+- Before shipping, I unified the two competing implementations (the slow
+  sequential one and the proven concurrent one) into a single shared
+  function, rather than just copying the fast pattern into a second place
+  — this codebase had already been bitten once by two call sites
+  reimplementing the same effect and quietly drifting apart, so collapsing
+  them into one was worth doing at the same time as the performance fix.
+- Verified with real, live traffic rather than trusting the diff: fired
+  every chunk of an actual multi-chunk file at the server *concurrently*
+  and confirmed no race condition and a correct final result: then did it
+  again with **two separate files uploading at once**, each with its own
+  concurrent chunk set, interleaved — to mirror what actually happens when
+  a user selects two files together — and confirmed neither file's data
+  contaminated the other's.
+
+### Result
+
+Total upload time dropped by roughly the concurrency factor for large
+files, without making any individual request faster — because the fix
+wasn't "make the 24 seconds shorter," it was "stop wasting the 24 seconds
+by only ever doing one at a time." The phase-by-phase timing breakdown
+now ships as a standing diagnostic, so this class of question doesn't
+require re-deriving the same investigation from scratch next time; the
+next lever, if the 24-second figure itself needs attacking, is now a
+known, logged number rather than a guess — and would mean isolating how
+much of it is the third-party API round trip specifically versus this
+app's own database writes, which the new logging already separates.
+
+---
+
+## Likely follow-up questions, and how to answer them
+
+**"How did you know it was a server problem and not the network?"**
+> I didn't assume it — I broke the request down by phase instead of
+> looking at total time. Connection setup and content download were both
+> under a handful of milliseconds, and sending the request body itself was
+> under 100ms. The only phase with any meaningful time in it was "waiting
+> for a response" — over 99% of the total. That's a clean signal: the
+> browser handed the data off quickly and then just waited, which only
+> happens when the other side is genuinely busy, not when the network
+> itself is slow.
+
+**"Why not just make each chunk request faster instead of running them
+concurrently?"**
+> I did look for that first — it's the better fix if it's available. But
+> the endpoint's own code had nothing expensive in it, which meant the
+> ~24 seconds was very likely the external API call itself (or possibly
+> the hosting platform's own execution characteristics) — not something
+> a code change in this codebase can shorten directly. When the fixed
+> cost per unit of work can't be reduced, the correct lever is doing more
+> units of work at once, not pretending you can make one unit faster
+> without evidence.
+
+**"Doesn't adding concurrency risk race conditions?"**
+> That's exactly why I didn't ship it on code review alone — I tested it
+> against the real backend with real concurrent traffic before calling it
+> done, including the harder case of two different files' chunks
+> interleaved at the same time, not just one file's chunks running
+> concurrently with each other. Every chunk is scoped by its own file and
+> chunk index, so the design doesn't share mutable state across concurrent
+> requests, but "the design should be safe" and "I confirmed it's safe
+> under real concurrent load" are different claims, and I wanted to be
+> able to make the second one.
+
+**"You found an existing concurrent implementation elsewhere in the
+codebase — how did you find that, and what does it tell you?"**
+> I was about to write a worker-pool from scratch when I went looking for
+> how the "resume after a page refresh" path handled the same chunking
+> problem, and found it already did exactly what I needed, well-tested and
+> already proven in production use. That told me two things: first, don't
+> build what already exists — reuse it. Second, its existence *elsewhere*
+> but not on the primary path was itself a signal worth flagging: two
+> independent implementations of the same logic is a maintenance smell on
+> its own, regardless of which one is faster, so unifying them was part of
+> the fix, not an unrelated cleanup.
+
+**"What would you do next if the 24 seconds itself needed to come down?"**
+> I'd use the same phase-level logging I already added, specifically the
+> split between the actual third-party API call and this app's own
+> database write, to find out how much of the 24 seconds is genuinely
+> outside this codebase's control versus something still fixable here. If
+> it's dominated by the external API call itself, the next lever is
+> usually infrastructure-level (e.g. a self-hosted version of that
+> provider's API server, which removes a network hop entirely) rather than
+> anything else in application code — a bigger, infrastructure-level change
+> I'd scope separately rather than fold into a quick fix.
+
+---
+
+## Notes on delivery
+
+- Open with the *measurement*, not the fix. "I found 99% of the time was
+  server-side, and here's the three numbers that proved it" is a much
+  stronger opening than "I added concurrency." It shows the investigation
+  discipline, not just the outcome.
+- This story's strongest signal is different from the session-bug story
+  above: that one was about recognizing when to escalate a UI glitch into
+  a security investigation. This one is about *not guessing* — ruling out
+  cheap explanations before reaching for an expensive fix, and verifying
+  the fix against real concurrent traffic rather than trusting the diff.
+- If asked to go deeper technically, be ready to explain precisely *why*
+  low connection-setup and content-download numbers rule out network
+  causes, and why low request-send time rules out client-side compute —
+  each phase of a network request timing breakdown maps to a specific
+  category of possible cause, and knowing that mapping cold is what makes
+  the diagnosis convincing rather than lucky.

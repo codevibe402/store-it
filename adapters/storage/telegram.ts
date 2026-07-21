@@ -21,8 +21,12 @@ export async function sendDocument(
   const body = await res.json();
 
   if (!res.ok) {
-    const err = new Error(body.description || "Telegram upload failed") as Error & { code?: number };
+    const err = new Error(body.description || "Telegram upload failed") as Error & { code?: number; retryAfterSeconds?: number };
     err.code = res.status;
+    // Telegram's own flood-control signal on a 429 — the actual number of
+    // seconds it wants callers to wait, not a guess. The chunk route uses
+    // this instead of a blind fixed backoff when present.
+    err.retryAfterSeconds = body?.parameters?.retry_after;
     throw err;
   }
 
