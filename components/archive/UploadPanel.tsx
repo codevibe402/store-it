@@ -235,10 +235,11 @@ function UploadPanel({ currentFolderId = null }: UploadPanelProps) {
                       <div className={styles.rowMeta}>
                         {formatBytes(re.size)}
                         {re.status === "resuming" && <span> · {re.progress}%</span>}
+                        {re.status === "pausing" && <span> · {re.progress}% · Pausing…</span>}
                         {re.status === "paused" && <span className={styles.paused}>Paused</span>}
                         {re.status === "success" && <span className={styles.success}>Uploaded</span>}
                       </div>
-                      {(re.status === "resuming" || re.status === "paused") && (
+                      {(re.status === "resuming" || re.status === "pausing" || re.status === "paused") && (
                         <div className={styles.progressTrack}>
                           <div className={styles.progressFill} style={{ width: `${Math.max(0, re.progress)}%` }} />
                         </div>
@@ -251,7 +252,11 @@ function UploadPanel({ currentFolderId = null }: UploadPanelProps) {
                           Pause
                         </button>
                       )}
-                      {re.status === "paused" && pf && (
+                      {/* Clickable during "pausing" too — handleResume already
+                          waits for the in-flight attempt to drain before
+                          starting a new one, so there's no reason to leave
+                          nothing clickable while a slow chunk finishes. */}
+                      {(re.status === "pausing" || re.status === "paused") && pf && (
                         <button type="button" onClick={() => resumeHook.startResume(pf)}>
                           Resume
                         </button>
@@ -357,7 +362,7 @@ function UploadRow({
   onResume: () => void;
   onCancel: () => void;
 }) {
-  const inProgress = entry.status === "uploading" || entry.status === "paused";
+  const inProgress = entry.status === "uploading" || entry.status === "pausing" || entry.status === "paused";
   const kind =
     entry.status === "success" ? "success" : entry.status === "error" ? "error" : entry.status === "duplicate" ? "duplicate" : "uploading";
 
@@ -381,6 +386,7 @@ function UploadRow({
           <div className={styles.rowMeta}>
             {formatBytes(entry.size)}
             {inProgress && <span> · {entry.progress}%</span>}
+            {entry.status === "pausing" && <span className={styles.paused}>Pausing…</span>}
             {entry.status === "paused" && <span className={styles.paused}>Paused</span>}
             {entry.status === "success" && <span className={styles.success}>Uploaded</span>}
             {entry.status === "duplicate" && <span className={styles.duplicate}>Duplicate</span>}
@@ -410,7 +416,12 @@ function UploadRow({
           </div>
         )}
 
-        {entry.status === "paused" && (
+        {/* Resume is clickable during "pausing" too, not just once fully
+            "paused" — resumeSingleUpload already waits for the in-flight
+            batch to drain before starting a new one, so there's no
+            correctness reason to leave the user with nothing to click while
+            a slow chunk (can be 10s-100s+ in practice) finishes draining. */}
+        {(entry.status === "pausing" || entry.status === "paused") && (
           <div className={styles.rowActions}>
             <button type="button" onClick={onResume}>
               Resume

@@ -29,7 +29,12 @@ export type ResumeEntry = {
   fileId: string;
   filename: string;
   size: number;
-  status: "pending" | "resuming" | "paused" | "success" | "error";
+  // "pausing" is the honest in-between state: pause was requested but the
+  // in-flight chunk workers from before the request haven't drained yet
+  // (they finish naturally rather than being aborted mid-transfer — see
+  // client/lib/telegramWorker.ts). Only once they've actually stopped does
+  // the entry become "paused".
+  status: "pending" | "resuming" | "pausing" | "paused" | "success" | "error";
   progress: number;
   error?: string;
 };
@@ -103,6 +108,14 @@ export function useResume() {
   const cancelRef = useRef(false);
   const pauseRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  // The currently in-flight resumeUpload() call for a given fileId. Lets
+  // pause wait for a true drain before reporting "paused", and lets a
+  // subsequent resume wait for a prior attempt to fully stop before starting
+  // a new one — closing the race where an old worker pool sees the shared
+  // pauseRef cleared by a new resume and keeps grabbing chunks from its own
+  // independent counter, duplicating uploads. See the matching fix (and
+  // fuller explanation) in hooks/useUpload.ts's activeUploadRun.
+  const activeResumeRun = useRef(new Map<string, Promise<ResumeResult>>());
 
   const updateEntry = useCallback((fileId: string, patch: Partial<ResumeEntry>) => {
     setResumeEntries((prev) => prev.map((e) => (e.fileId === fileId ? { ...e, ...patch } : e)));
@@ -110,6 +123,24 @@ export function useResume() {
 
   const removeEntry = useCallback((fileId: string) => {
     setResumeEntries((prev) => prev.filter((e) => e.fileId !== fileId));
+  }, []);
+
+  // Waits for fileId's in-flight resumeUpload() run (if any) to fully
+  // drain, then flips it from "pausing" to "paused" — but only if it's
+  // still "pausing" at that point. A resume that raced in during the drain
+  // already moved status on to "resuming", which must win.
+  const settlePauseResume = useCallback((fileId: string) => {
+    const finish = () => {
+      setResumeEntries((prev) =>
+        prev.map((e) => (e.fileId === fileId && e.status === "pausing" ? { ...e, status: "paused" as const } : e))
+      );
+    };
+    const runPromise = activeResumeRun.current.get(fileId);
+    if (runPromise) {
+      runPromise.catch(() => {}).finally(finish);
+    } else {
+      finish();
+    }
   }, []);
 
   const cancelResume = useCallback(async (pf: FileType) => {
@@ -133,6 +164,14 @@ export function useResume() {
   }, [queryClient, removeEntry]);
 
   const handleResume = useCallback(async (pf: FileType, file: File, handle?: FileSystemFileHandle) => {
+    // Wait for a still-draining previous attempt (pause doesn't abort
+    // in-flight chunks — see client/lib/telegramWorker.ts) before starting a
+    // new one; otherwise the old worker pool sees the shared pauseRef
+    // cleared below and keeps grabbing chunks from its own independent
+    // counter alongside this new attempt, duplicating chunk uploads.
+    const priorRun = activeResumeRun.current.get(pf._id);
+    if (priorRun) await priorRun.catch(() => {});
+
     setResumeEntries((prev) => {
       if (!prev.find((e) => e.fileId === pf._id)) {
         return [...prev, { fileId: pf._id, filename: pf.filename, size: pf.size, status: "resuming", progress: 0 }];
@@ -143,9 +182,16 @@ export function useResume() {
     cancelRef.current = false;
     pauseRef.current = false;
 
-    const result = await resumeUpload(pf, file, handle, cancelRef, pauseRef, abortRef, (pct) => {
+    const runPromise = resumeUpload(pf, file, handle, cancelRef, pauseRef, abortRef, (pct) => {
       updateEntry(pf._id, { progress: pct });
     });
+    activeResumeRun.current.set(pf._id, runPromise);
+    let result: ResumeResult;
+    try {
+      result = await runPromise;
+    } finally {
+      if (activeResumeRun.current.get(pf._id) === runPromise) activeResumeRun.current.delete(pf._id);
+    }
 
     if (result.kind === "success") {
       updateEntry(pf._id, { status: "success", progress: 100 });
@@ -164,11 +210,17 @@ export function useResume() {
   const pauseSingleResume = useCallback(async (pf: FileType) => {
     pauseRef.current = true;
     cancelRef.current = false;
-    // Don't abort here: chunk workers already stop picking up new chunks as
-    // soon as pauseRef flips (see telegramWorker.ts), and any chunk still in
-    // flight is left to finish naturally instead of having its connection
-    // torn down mid-upload.
-    updateEntry(pf._id, { status: "paused" });
+    // Abort whatever chunk(s) are currently in flight rather than letting
+    // them finish naturally — a chunk send in this environment can take
+    // 10-100+ seconds, and graceful draining made Pause take just as long
+    // to actually take effect. telegramWorker.ts's worker loop already
+    // treats an aborted-while-paused chunk as a graceful stop, not an
+    // error, and it was never recorded server-side, so it's simply re-sent
+    // on resume. Status only becomes "paused" once settlePauseResume
+    // confirms that draining has actually finished — see its comment.
+    abortRef.current?.abort();
+    updateEntry(pf._id, { status: "pausing" });
+    settlePauseResume(pf._id);
 
     try {
       await fetch("/api/files/telegram/pause", {
@@ -178,7 +230,7 @@ export function useResume() {
       });
     } catch {}
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-  }, [queryClient, updateEntry]);
+  }, [queryClient, updateEntry, settlePauseResume]);
 
   const startResume = useCallback(async (pf: FileType) => {
     // Try cached handle

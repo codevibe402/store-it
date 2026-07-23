@@ -22,7 +22,13 @@ type FileType = {
   backend?: "s3" | "telegram";
 };
 
-type UploadStatus = "idle" | "uploading" | "paused" | "success" | "error" | "duplicate";
+// "pausing" is the honest in-between state: pause was requested but the
+// in-flight chunk workers from before the request haven't drained yet (they
+// finish naturally rather than being aborted mid-transfer — see
+// activeUploadRun below). Only once they've actually stopped does the entry
+// become "paused". Without this, resuming while still draining would race
+// the old workers against the new ones (see resumeSingleUpload).
+type UploadStatus = "idle" | "uploading" | "pausing" | "paused" | "success" | "error" | "duplicate";
 
 export type UploadEntry = {
   id: string;
@@ -72,6 +78,14 @@ export function useUpload(currentFolderId: string | null) {
   const pausedIds = useRef(new Set<string>());
   const abortControllers = useRef<Map<string, AbortController>>(new Map());
   const uploadMeta = useRef<Map<string, UploadMeta>>(new Map());
+  // The currently in-flight uploadChunks() call for a given upload id, set
+  // by whichever call site (handleFile or resumeSingleUpload) is currently
+  // running its worker pool. Lets pause wait for a true drain before
+  // reporting "paused", and lets resume wait for a prior batch to fully
+  // stop before starting a new one — closing the race where an old batch's
+  // workers see the pause flag cleared (by a new resume) and keep grabbing
+  // chunks from their own independent counter, duplicating uploads.
+  const activeUploadRun = useRef<Map<string, Promise<number>>>(new Map());
   const restoredFiles = useRef<Map<string, File>>(new Map());
   const handleFileRef = useRef<((file: File, folderId?: string | null, handle?: FileSystemFileHandle) => Promise<void>) | null>(null);
 
@@ -97,14 +111,43 @@ export function useUpload(currentFolderId: string | null) {
     }
   }, [uploads]);
 
-  const pauseUpload = useCallback(() => {
-    setUploads((prev) => {
-      for (const u of prev) {
-        if (u.status === "uploading") pausedIds.current.add(u.id);
-      }
-      return prev.map((u) => (u.status === "uploading" ? { ...u, status: "paused" as const } : u));
-    });
+  // Waits for id's in-flight uploadChunks() run (if any) to fully drain,
+  // then flips it from "pausing" to "paused" — but only if it's still
+  // "pausing" at that point. A resume that raced in during the drain
+  // already moved status on to "uploading", which must win; flipping to
+  // "paused" here regardless would stomp a resume that's already underway.
+  const settlePause = useCallback((id: string) => {
+    const finish = () => {
+      setUploads((prev) =>
+        prev.map((u) => (u.id === id && u.status === "pausing" ? { ...u, status: "paused" as const } : u))
+      );
+    };
+    const runPromise = activeUploadRun.current.get(id);
+    if (runPromise) {
+      runPromise.catch(() => {}).finally(finish);
+    } else {
+      finish();
+    }
   }, []);
+
+  const pauseUpload = useCallback(() => {
+    const idsToPause = uploads.filter((u) => u.status === "uploading").map((u) => u.id);
+    for (const id of idsToPause) {
+      pausedIds.current.add(id);
+      // Abort whatever chunk(s) are currently in flight rather than letting
+      // them finish naturally — a chunk send in this environment can take
+      // 10-100+ seconds, and graceful draining made Pause take just as long
+      // to actually take effect. An aborted chunk was never recorded
+      // server-side (TelegramChunk.create only runs after a successful
+      // response), so it's simply re-sent on resume — a bounded, cheap cost
+      // against making the user wait indefinitely.
+      abortControllers.current.get(id)?.abort();
+    }
+    setUploads((prev) =>
+      prev.map((u) => (idsToPause.includes(u.id) ? { ...u, status: "pausing" as const } : u))
+    );
+    for (const id of idsToPause) settlePause(id);
+  }, [uploads, settlePause]);
 
   const cancelSingleUpload = useCallback((id: string) => {
     const ctrl = abortControllers.current.get(id);
@@ -118,10 +161,14 @@ export function useUpload(currentFolderId: string | null) {
 
   const pauseSingleUpload = useCallback((id: string) => {
     pausedIds.current.add(id);
+    // See the matching comment in pauseUpload — abort in-flight chunk(s)
+    // instead of waiting out however long they take to finish naturally.
+    abortControllers.current.get(id)?.abort();
     setUploads((prev) =>
-      prev.map((u) => (u.id === id && u.status === "uploading" ? { ...u, status: "paused" as const } : u))
+      prev.map((u) => (u.id === id && u.status === "uploading" ? { ...u, status: "pausing" as const } : u))
     );
-  }, []);
+    settlePause(id);
+  }, [settlePause]);
 
   // Shared by both the initial upload (handleFile) and the in-memory resume
   // path (resumeSingleUpload) — previously each had its own near-duplicate,
@@ -420,6 +467,15 @@ export function useUpload(currentFolderId: string | null) {
     const meta = uploadMeta.current.get(id);
     if (!meta) return;
 
+    // Wait for a still-draining previous batch (pause doesn't abort in-flight
+    // chunks, it just stops new ones being picked up — see uploadChunks)
+    // before clearing pausedIds and starting a new one. Skipping this wait
+    // is exactly what let old workers, upon seeing pausedIds cleared below,
+    // keep grabbing chunks from their own independent counter alongside the
+    // new batch — duplicating chunk uploads against the same file.
+    const priorRun = activeUploadRun.current.get(id);
+    if (priorRun) await priorRun.catch(() => {});
+
     pausedIds.current.delete(id);
     updateUpload(id, { status: "uploading", progress: 0, error: "" });
 
@@ -443,7 +499,13 @@ export function useUpload(currentFolderId: string | null) {
       // per-file salt/derivation needed.
       const cryptoKey = getSessionDEK();
 
-      uploadedBytes = await uploadChunks(id, file, fileId, totalChunks, chunkSize, cryptoKey, controller, uploadedBytes, uploadedIndexes);
+      const runPromise = uploadChunks(id, file, fileId, totalChunks, chunkSize, cryptoKey, controller, uploadedBytes, uploadedIndexes);
+      activeUploadRun.current.set(id, runPromise);
+      try {
+        uploadedBytes = await runPromise;
+      } finally {
+        if (activeUploadRun.current.get(id) === runPromise) activeUploadRun.current.delete(id);
+      }
 
       abortControllers.current.delete(id);
 
@@ -673,7 +735,14 @@ export function useUpload(currentFolderId: string | null) {
         hash,
       });
 
-      const uploadedBytes = await uploadChunks(id, file, fileId, totalChunks, chunkSize, dek, controller, 0, new Set());
+      const runPromise = uploadChunks(id, file, fileId, totalChunks, chunkSize, dek, controller, 0, new Set());
+      activeUploadRun.current.set(id, runPromise);
+      let uploadedBytes: number;
+      try {
+        uploadedBytes = await runPromise;
+      } finally {
+        if (activeUploadRun.current.get(id) === runPromise) activeUploadRun.current.delete(id);
+      }
 
       abortControllers.current.delete(id);
 
