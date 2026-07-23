@@ -2,24 +2,8 @@
 import { beforeAll, afterAll, afterEach, describe, it, expect } from "vitest";
 import { connectTestDB, disconnectTestDB, clearTestDB } from "@/tests/helpers/testDb";
 import { _clearAllRateLimitsForTests } from "@/server/lib/rateLimit";
-import { authOptions } from "./config";
+import { verifyCredentials } from "./credentials";
 import User from "@/adapters/database/models/User";
-
-// NextAuth v4's CredentialsProvider() factory returns a fixed shape
-// (id/name/authorize are stubs — always id: "credentials") and stashes the
-// real per-call options (including our actual `id` and `authorize`) under
-// `.options`; NextAuth's own init merges that in later. Both the
-// 'credentials' and 'telegram' providers below are CredentialsProvider()
-// calls, so they're indistinguishable by top-level `.id` at this raw
-// pre-init stage — match on `.options.id` (our original, real id) instead.
-const credentialsProviderConfig = authOptions.providers.find(
-  (p) => (p as unknown as { options: { id: string } }).options.id === "credentials",
-) as unknown as { options: { authorize: (creds: Record<string, string> | undefined, req: { headers: Record<string, string> }) => Promise<unknown> } };
-const credentialsProvider = { authorize: credentialsProviderConfig.options.authorize };
-
-function reqWithIp(ip: string) {
-  return { headers: { "x-forwarded-for": ip }, body: {}, query: {}, method: "POST" };
-}
 
 // The User model's pre-save hook hashes `password` itself — passing an
 // already-hashed value here would double-hash it and break bcrypt.compare
@@ -47,14 +31,14 @@ describe("credentials login rate limiting / lockout", () => {
 
     for (let i = 0; i < 5; i++) {
       await expect(
-        credentialsProvider.authorize({ email: "victim@example.com", password: "wrong-password" }, reqWithIp(`10.0.0.${i}`)),
+        verifyCredentials("victim@example.com", "wrong-password", `10.0.0.${i}`),
       ).rejects.toThrow("Invalid credentials");
     }
 
     // 6th attempt, even from a brand-new IP, with the CORRECT password —
     // the account itself is locked, not just the attacking IP.
     await expect(
-      credentialsProvider.authorize({ email: "victim@example.com", password: "correct-horse" }, reqWithIp("10.0.0.99")),
+      verifyCredentials("victim@example.com", "correct-horse", "10.0.0.99"),
     ).rejects.toThrow("Too many login attempts");
   });
 
@@ -63,18 +47,18 @@ describe("credentials login rate limiting / lockout", () => {
 
     for (let i = 0; i < 3; i++) {
       await expect(
-        credentialsProvider.authorize({ email: "gooduser@example.com", password: "wrong-pass" }, reqWithIp("10.0.1.1")),
+        verifyCredentials("gooduser@example.com", "wrong-pass", "10.0.1.1"),
       ).rejects.toThrow("Invalid credentials");
     }
 
-    const user = await credentialsProvider.authorize({ email: "gooduser@example.com", password: "correct-horse" }, reqWithIp("10.0.1.1"));
+    const user = await verifyCredentials("gooduser@example.com", "correct-horse", "10.0.1.1");
     expect(user).toBeTruthy();
 
     // Counter was reset by the success — three more failures shouldn't hit
     // the 5-attempt lockout on their own.
     for (let i = 0; i < 3; i++) {
       await expect(
-        credentialsProvider.authorize({ email: "gooduser@example.com", password: "wrong-again" }, reqWithIp("10.0.1.1")),
+        verifyCredentials("gooduser@example.com", "wrong-again", "10.0.1.1"),
       ).rejects.toThrow("Invalid credentials");
     }
   });
@@ -86,12 +70,20 @@ describe("credentials login rate limiting / lockout", () => {
 
     for (let i = 0; i < 20; i++) {
       await expect(
-        credentialsProvider.authorize({ email: `stuff${i}@example.com`, password: "wrong-guess" }, reqWithIp("198.51.100.50")),
+        verifyCredentials(`stuff${i}@example.com`, "wrong-guess", "198.51.100.50"),
       ).rejects.toThrow("Invalid credentials");
     }
 
     await expect(
-      credentialsProvider.authorize({ email: "stuff20@example.com", password: "wrong-guess" }, reqWithIp("198.51.100.50")),
+      verifyCredentials("stuff20@example.com", "wrong-guess", "198.51.100.50"),
     ).rejects.toThrow("Too many login attempts");
+  });
+
+  it("rejects a google/telegram-provider user attempting password login with a generic message", async () => {
+    await User.create({ email: "social@example.com", name: "Social User", provider: "google", providerId: "abc123" });
+
+    await expect(
+      verifyCredentials("social@example.com", "whatever-password", "10.0.2.1"),
+    ).rejects.toThrow("Invalid credentials");
   });
 });

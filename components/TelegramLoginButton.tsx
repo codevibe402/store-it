@@ -1,14 +1,13 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { signIn } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { Button } from "./ui/button"
 import { useAuth } from "./AuthProvider"
 
 export function TelegramLoginButton() {
   const router = useRouter()
-  const { exchangeSession } = useAuth()
+  const { setAuthUser } = useAuth()
   const containerRef = useRef<HTMLDivElement>(null)
   const [botUsername, setBotUsername] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -30,26 +29,26 @@ export function TelegramLoginButton() {
     if (existing) return;
 
     ;(window as any).onTelegramAuth = async (user: any) => {
-      const result = await signIn("telegram", {
-        id: String(user.id),
-        first_name: user.first_name || "",
-        last_name: user.last_name || "",
-        username: user.username || "",
-        photo_url: user.photo_url || "",
-        auth_date: String(user.auth_date),
-        hash: user.hash,
-        redirect: false,
+      const res = await fetch("/api/auth/telegram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: String(user.id),
+          first_name: user.first_name || "",
+          last_name: user.last_name || "",
+          username: user.username || "",
+          photo_url: user.photo_url || "",
+          auth_date: String(user.auth_date),
+          hash: user.hash,
+        }),
       })
-      if (result?.ok) {
-        // Explicit continuation of this sign-in, same pattern as
-        // credentials login (Authform.tsx) — AuthProvider's ambient
-        // bootstrap only refreshes an *existing* app session, it never
-        // mints one from NextAuth session state on its own. Must go
-        // through exchangeSession() (not a disconnected raw fetch) so its
-        // setUser(...) actually updates useAuth()'s client-side state —
-        // otherwise RequireAuth reads isAuthenticated as still false and
-        // bounces straight back to /sign_in.
-        await exchangeSession()
+      if (res.ok) {
+        const data = await res.json()
+        // Must go through setAuthUser() (not left unset) so useAuth()'s
+        // client-side state actually updates — otherwise RequireAuth reads
+        // isAuthenticated as still false and bounces straight back to
+        // /sign_in.
+        setAuthUser(data.user)
         router.push("/dashboard")
       }
     }
@@ -66,7 +65,7 @@ export function TelegramLoginButton() {
     return () => {
       delete (window as any).onTelegramAuth
     }
-  }, [botUsername, router, exchangeSession])
+  }, [botUsername, router, setAuthUser])
 
   if (loading) {
     return (

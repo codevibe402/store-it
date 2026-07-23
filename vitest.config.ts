@@ -24,6 +24,9 @@ export default defineConfig({
       // cache with a real mongodb-memory-server connection before any route
       // handler gets a chance to call connectDB().
       MONGODB_URI: "mongodb://placeholder-unused",
+      // Fixed value so tests can compute a matching Telegram widget HMAC
+      // (see server/auth/telegram.test.ts) without touching the real .env.
+      TELEGRAM_BOT_TOKEN: "test-bot-token",
     },
   },
 });

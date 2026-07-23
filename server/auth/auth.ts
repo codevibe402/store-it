@@ -1,8 +1,18 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { verifyAccessToken, type AuthUser } from '@/server/auth/token';
+import { verifyAccessToken, generateAccessToken, createRefreshToken, type AuthUser } from '@/server/auth/token';
 
 export type { AuthUser };
+
+// Mints a fresh access/refresh token pair for a just-authenticated user and
+// sets both cookies on the response. The single call site every login route
+// (credentials, telegram, google) goes through, so cookie-setting can't
+// drift between them.
+export async function issueSession(res: NextResponse, user: AuthUser): Promise<void> {
+  const accessToken = generateAccessToken(user);
+  const refreshToken = await createRefreshToken(user.userId);
+  setAuthCookies(res, accessToken, refreshToken);
+}
 
 export async function getAuthUser(): Promise<AuthUser | null> {
   const cookieStore = await cookies();

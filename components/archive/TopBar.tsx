@@ -1,16 +1,16 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { useSession } from "next-auth/react";
+import { useAuth } from "@/components/AuthProvider";
 import { FolderPlus, Search, Upload } from "lucide-react";
 import { useArchive } from "./ArchiveContext";
 import styles from "./TopBar.module.css";
 
 export default function TopBar() {
   const { search, setSearch, setShowNewFolder, setNewFolderName, setActivePage } = useArchive();
-  const { data: session } = useSession();
+  const { user } = useAuth();
 
-  const initial = (session?.user?.email || session?.user?.name || "S").trim().charAt(0).toUpperCase();
+  const initial = (user?.email || "S").trim().charAt(0).toUpperCase();
 
   return (
     <div className={styles.topbar}>

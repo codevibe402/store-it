@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
-import { useSession, signOut } from 'next-auth/react';
 import { getDeviceDEK } from '@/client/lib/dekStore';
 import { importDEK } from '@/client/lib/dek';
 import { setSessionDEK, clearSessionDEK, base64ToBuffer } from '@/hooks/useFileEncryption';
@@ -16,12 +15,8 @@ export const DEK_RECOVERY_REQUESTED_KEY = 'storeit_dek_recovery_requested';
 
 // /share/** is a public, token-authenticated route with its own independent
 // session system (see server/lib/shareSession.ts) — it must never touch the
-// main app's session. Letting the ambient exchange bootstrap run there was
-// the root cause of a real bug: a stale NextAuth session for a *different*
-// account sitting in the browser would get silently exchanged into
-// access_token/refresh_token (cookies are browser-wide, not per-tab),
-// switching which account every tab is authenticated as just from opening a
-// share link — no login action taken.
+// main app's session (no reason to spend a refresh round-trip or run DEK
+// bootstrap on a page anyone can open via a link).
 function isExemptFromSessionBootstrap(pathname: string | null): boolean {
   return !!pathname && pathname.startsWith('/share');
 }
@@ -38,7 +33,10 @@ type AuthContextValue = {
   user: AuthUser | null;
   isReady: boolean;
   isAuthenticated: boolean;
-  exchangeSession: () => Promise<void>;
+  // Called by each login path (Authform.tsx, TelegramLoginButton.tsx) with
+  // the `{user}` its own POST already returned, so the client's session
+  // state updates immediately without a redundant extra round-trip.
+  setAuthUser: (user: AuthUser) => void;
   logout: () => Promise<void>;
   // Called by the sign-in page's explicit "I have a recovery code" action —
   // the only place this should ever be called from. Arms the recovery
@@ -52,7 +50,7 @@ const AuthContext = createContext<AuthContextValue>({
   user: null,
   isReady: false,
   isAuthenticated: false,
-  exchangeSession: async () => {},
+  setAuthUser: () => {},
   logout: async () => {},
   requestDekRecovery: () => {},
 });
@@ -62,7 +60,6 @@ export function useAuth() {
 }
 
 export default function AuthProvider({ children }: { children: ReactNode }) {
-  const { data: session, status } = useSession();
   const pathname = usePathname();
   const exempt = isExemptFromSessionBootstrap(pathname);
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -70,42 +67,22 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [dekModal, setDekModal] = useState<'setup' | 'recovery' | null>(null);
   const [dekBootstrappedFor, setDekBootstrappedFor] = useState<string | null>(null);
 
-  // Set for the duration of an explicit logout so a NextAuth `status` that
-  // hasn't caught up to signOut() yet can't re-trigger exchangeSession and
-  // silently resurrect the session mid-logout. Cleared once NextAuth
-  // confirms the session is actually gone, so the next real login (status
-  // flipping back to 'authenticated') is treated normally.
+  // Set for the duration of an explicit logout so the 10-minute silent
+  // refresh interval (below) can't land its response after logout's own
+  // setUser(null) and resurrect a "still logged in" UI even though the
+  // server-side refresh token was just revoked.
   const loggingOutRef = useRef(false);
 
-  useEffect(() => {
-    if (status === 'unauthenticated') loggingOutRef.current = false;
-  }, [status]);
-
-  const exchangeSession = useCallback(async () => {
-    try {
-      const res = await fetch('/api/auth/exchange', { method: 'POST' });
-      if (!res.ok) return;
-      const data = await res.json();
-      setUser(data.user);
-    } catch {
-      // silent
-    }
+  const setAuthUser = useCallback((newUser: AuthUser) => {
+    // A real login always supersedes a prior logout-in-flight, even if the
+    // silent-refresh interval's guard above hasn't cleared yet.
+    loggingOutRef.current = false;
+    setUser(newUser);
   }, []);
 
   const logout = useCallback(async () => {
     loggingOutRef.current = true;
-    // Clears both session systems from a single call site — a caller that
-    // only cleared the app's own JWT (via /api/auth/logout) and forgot
-    // NextAuth's signOut() would leave a real, valid NextAuth session
-    // sitting in the browser, which is exactly the "two systems disagree"
-    // shape this app has already been bitten by once (see
-    // SESSION_EXCHANGE_VULNERABILITY.md). Doing both here means every
-    // future logout entry point gets this for free instead of having to
-    // remember to pair the calls itself.
-    await Promise.all([
-      fetch('/api/auth/logout', { method: 'POST' }),
-      signOut({ redirect: false }),
-    ]);
+    await fetch('/api/auth/logout', { method: 'POST' });
     setUser(null);
     clearSessionDEK();
     setDekModal(null);
@@ -117,7 +94,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       const res = await fetch('/api/auth/refresh', { method: 'POST' });
       if (!res.ok) return false;
       const data = await res.json();
-      setUser(data.user);
+      if (!loggingOutRef.current) setUser(data.user);
       return true;
     } catch {
       return false;
@@ -137,69 +114,24 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (status === 'loading') return;
-
     const init = async () => {
-      // Public share routes never need the main app's session —
-      // bootstrapping it there is exactly what let a stale, different-
-      // account NextAuth session silently take over the browser's
-      // cookies. See isExemptFromSessionBootstrap above.
-      if (exempt || loggingOutRef.current) {
+      // Public share routes never need the main app's session bootstrapped.
+      // Google's callback route (app/api/auth/google/callback/route.ts) sets
+      // access_token/refresh_token cookies server-side before ever
+      // redirecting here, so a plain fetchUser() on mount picks up a fresh
+      // Google login exactly the same way it picks up any other existing
+      // session — no marker/exchange step needed.
+      if (exempt) {
         setIsReady(true);
         return;
       }
 
-      // Google's OAuth redirect lands here with a one-time authExchange=1
-      // marker still in the URL (stripped by the effect below, which runs
-      // after this one on the same mount). Defer to that effect entirely
-      // when it's present — otherwise fetchUser() (POST /api/auth/refresh)
-      // fails instantly on a fresh login (no refresh_token cookie exists
-      // yet) and flips isReady true with user still null, which races
-      // RequireAuth into bouncing to /sign_in before the marker's slower
-      // exchangeSession() (getServerSession + a DB lookup) ever resolves.
-      if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('authExchange') === '1') {
-        return;
-      }
-
-      // Only ever refreshes an *existing* app session from its own
-      // refresh_token — never mints a new one from whatever NextAuth
-      // session happens to be sitting in the browser. exchangeSession() is
-      // deliberately not called here: it's explicit-only now, invoked
-      // directly by each login path the instant it knows a real sign-in
-      // just happened in this tab (credentials: Authform.tsx right after
-      // signIn() resolves; Telegram: TelegramLoginButton.tsx, same
-      // pattern; Google: the marker-gated effect below, since its redirect
-      // leaves and re-enters the page with no other way to signal "this
-      // authenticated status is fresh, not a stale leftover session").
       await fetchUser();
       setIsReady(true);
     };
 
     init();
-  }, [status, fetchUser, exempt]);
-
-  // Explicit continuation of the Google OAuth redirect (see Authform.tsx's
-  // callbackUrl). Gated on a one-time marker that only that redirect ever
-  // sets — never on ambient session status — so a stale NextAuth session
-  // from a different account can't trigger this just by being present.
-  useEffect(() => {
-    if (exempt || typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('authExchange') !== '1') return;
-
-    params.delete('authExchange');
-    const newSearch = params.toString();
-    window.history.replaceState({}, '', window.location.pathname + (newSearch ? `?${newSearch}` : ''));
-
-    // isReady is flipped here, not by the init effect above (which bails
-    // out when this marker is present) — so RequireAuth never sees
-    // isReady=true before this exchange has actually had a chance to
-    // succeed or fail.
-    void (async () => {
-      await exchangeSession();
-      setIsReady(true);
-    })();
-  }, [exempt, exchangeSession]);
+  }, [fetchUser, exempt]);
 
   // Silently keeps access_token alive for as long as the tab stays open.
   // Nothing else in the app ever refreshes it proactively — fetchUser() is
@@ -214,9 +146,8 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   // 401 response carries no canFallbackToS3 flag. A fixed interval well
   // under the 15-minute lifetime, calling the same already-safe
   // fetchUser() the initial mount uses (renews the session's own,
-  // already-verified refresh_token — never mints a new identity from
-  // ambient state, the thing rule 6 in SESSION_EXCHANGE_VULNERABILITY.md
-  // warns against), keeps it from ever going stale while the tab is open.
+  // already-verified refresh_token), keeps it from ever going stale while
+  // the tab is open.
   useEffect(() => {
     if (exempt || !user) return;
     const interval = setInterval(() => { void fetchUser(); }, 10 * 60 * 1000);
@@ -274,7 +205,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   }, [isReady, user, dekBootstrappedFor, exempt, dekRecoveryTrigger]);
 
   return (
-    <AuthContext.Provider value={{ user, isReady, isAuthenticated: !!user, exchangeSession, logout, requestDekRecovery }}>
+    <AuthContext.Provider value={{ user, isReady, isAuthenticated: !!user, setAuthUser, logout, requestDekRecovery }}>
       {children}
       {dekModal === 'setup' && user && (
         <EncryptionSetupModal userId={user.userId} onComplete={() => setDekModal(null)} />

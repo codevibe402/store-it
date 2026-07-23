@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Geist } from "next/font/google";
 import { cn } from "@/shared/utils";
-import SessionProviderWrapper from '@/app/sessionprovidewrapper/page';
+import AuthProvider from "@/components/AuthProvider";
 
 import Providers from "@/components/ui/providers";
 
@@ -19,12 +19,12 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={cn("font-sans", geist.variable)}>
-      <body> <SessionProviderWrapper>
+      <body> <AuthProvider>
   <Providers>
     {children}
      <Toaster richColors position="top-right" />
   </Providers>
-</SessionProviderWrapper>
+</AuthProvider>
       </body>
     </html>
   );

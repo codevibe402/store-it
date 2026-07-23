@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { signIn } from "next-auth/react"
 
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm, Resolver } from "react-hook-form"
@@ -52,7 +51,7 @@ const signUpSchema = z.object({
 
 const Authform = () => {
     const router = useRouter()
-  const { isAuthenticated, requestDekRecovery, exchangeSession } = useAuth()
+  const { isAuthenticated, requestDekRecovery, setAuthUser } = useAuth()
   const [type, setType] = React.useState<FormType>("sign-in")
   const [showForgotPassword, setShowForgotPassword] = React.useState(false)
   const [recoveryArmed, setRecoveryArmed] = React.useState(false)
@@ -105,24 +104,23 @@ async function onSubmit(data: FormValues) {
       return
     }
 
-    const res = await signIn("credentials", {
-      email: safeEmail,
-      password: safePassword,
-      redirect: false,
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: safeEmail, password: safePassword }),
     })
+    const loginResult = await res.json().catch(() => ({}))
 
-    if (res?.error) {
-      toast.error("Invalid credentials")
+    if (!res.ok) {
+      toast.error(loginResult.error || "Invalid credentials")
       return
     }
 
-    // Exchange next-auth session for access + refresh tokens. Must go
-    // through AuthProvider's exchangeSession() (not a disconnected raw
-    // fetch) so its setUser(...) actually updates the app's client-side
-    // session state — a bare fetch sets the cookies server-side but leaves
-    // useAuth().isAuthenticated false, which RequireAuth immediately reads
-    // as "not logged in" and bounces straight back to /sign_in.
-    await exchangeSession()
+    // Must go through AuthProvider's setAuthUser() (not left unset) so the
+    // app's client-side session state actually updates — otherwise
+    // useAuth().isAuthenticated stays false, which RequireAuth immediately
+    // reads as "not logged in" and bounces straight back to /sign_in.
+    setAuthUser(loginResult.user)
 
     toast.success("Logged in successfully!")
     router.push("/dashboard")
@@ -265,7 +263,7 @@ async function onSubmit(data: FormValues) {
           type="button"
           variant="secondary"
           className="w-full"
-          onClick={() => signIn("google", { callbackUrl: `${window.location.origin}/dashboard?authExchange=1` })}
+          onClick={() => { window.location.href = "/api/auth/google" }}
         >
           Sign In with Google
         </Button>

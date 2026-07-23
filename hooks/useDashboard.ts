@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSession } from "next-auth/react";
+import { useAuth } from "@/components/AuthProvider";
 
 type FileType = {
   _id: string;
@@ -32,8 +32,7 @@ type DashboardData = {
 };
 
 export function useDashboard() {
-  const { status: sessionStatus } = useSession();
-  const isAuthenticated = sessionStatus === "authenticated";
+  const { isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
 
   const { data: dashboard, isLoading: isLoading, error } = useQuery<DashboardData>({
