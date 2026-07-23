@@ -758,12 +758,10 @@ export function useUpload(currentFolderId: string | null) {
 
   const restoreQueue = useCallback(async (folderId?: string | null) => {
     const items = await getAllQueueItems();
-    const newEntries: UploadEntry[] = [];
+    const candidates: UploadEntry[] = [];
+    const candidateFiles = new Map<string, File>();
 
     for (const [id, item] of items) {
-      // Skip entries already in the uploads list
-      if (uploads.some((u) => u.id === id)) continue;
-
       let file: File | null = null;
 
       // Try FileSystemFileHandle first
@@ -789,8 +787,8 @@ export function useUpload(currentFolderId: string | null) {
       }
 
       if (file) {
-        restoredFiles.current.set(id, file);
-        newEntries.push({
+        candidateFiles.set(id, file);
+        candidates.push({
           id,
           filename: item.filename,
           size: item.size,
@@ -802,10 +800,28 @@ export function useUpload(currentFolderId: string | null) {
       }
     }
 
-    if (newEntries.length > 0) {
-      setUploads((prev) => [...prev, ...newEntries]);
-    }
-  }, [uploads]);
+    if (candidates.length === 0) return;
+
+    // The "already restored" check must happen against the live state at
+    // apply-time, inside this updater — not against the `uploads` this
+    // closure was created with. React Strict Mode double-invokes a mount
+    // effect in dev (exactly what triggers restoreQueue after a page
+    // refresh), and both invocations would otherwise see the same stale,
+    // pre-restore snapshot, both conclude "not present yet," and both
+    // append the same persisted item (its id is preserved verbatim across
+    // a restore) — producing two array entries with an identical id and
+    // the "two children with the same key" React warning.
+    setUploads((prev) => {
+      const existingIds = new Set(prev.map((u) => u.id));
+      const toAdd = candidates.filter((c) => !existingIds.has(c.id));
+      if (toAdd.length === 0) return prev;
+      for (const c of toAdd) {
+        const file = candidateFiles.get(c.id);
+        if (file) restoredFiles.current.set(c.id, file);
+      }
+      return [...prev, ...toAdd];
+    });
+  }, []);
 
   return {
     uploads,
