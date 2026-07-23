@@ -1,6 +1,7 @@
 "use client"
 
-import { deriveKey, encryptChunk, decryptChunk, bufferToBase64, base64ToBuffer } from "@/hooks/useFileEncryption"
+import { deriveKey, encryptChunk, decryptChunk, bufferToBase64, base64ToBuffer, setSessionDEK } from "@/hooks/useFileEncryption"
+import { storeDeviceDEK } from "@/client/lib/dekStore"
 
 const DEK_BYTE_LENGTH = 32 // AES-256
 const RECOVERY_CODE_ENTROPY_BYTES = 20 // 160 bits
@@ -71,4 +72,21 @@ export async function unwrapDEKBytes(
   wrappingKey: CryptoKey,
 ): Promise<Uint8Array> {
   return decryptChunk(base64ToBuffer(ciphertextBase64), wrappingKey, base64ToBuffer(nonceBase64))
+}
+
+// Shared by every place that turns a recovery code + this account's wrapped
+// DEK into a usable, device-local key: derive the wrapping key, unwrap,
+// persist it for this device (IndexedDB, see dekStore.ts), and make it the
+// active session key. Throws (AES-GCM auth-tag failure) if the code doesn't
+// match this account's wrap — that failure is the only signal callers get,
+// by design, since the server never verifies the code against the wrap.
+export async function unlockDeviceDEK(
+  userId: string,
+  recoveryCode: string,
+  wrapped: { recoveryWrapped: string; recoveryNonce: string; recoverySalt: string },
+): Promise<void> {
+  const wrappingKey = await deriveWrappingKey(normalizeRecoveryCode(recoveryCode), wrapped.recoverySalt)
+  const dekBytes = await unwrapDEKBytes(wrapped.recoveryWrapped, wrapped.recoveryNonce, wrappingKey)
+  await storeDeviceDEK(userId, bufferToBase64(dekBytes))
+  setSessionDEK(await importDEK(dekBytes))
 }

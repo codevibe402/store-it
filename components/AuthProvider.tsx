@@ -6,12 +6,6 @@ import { getDeviceDEK } from '@/client/lib/dekStore';
 import { importDEK } from '@/client/lib/dek';
 import { setSessionDEK, clearSessionDEK, base64ToBuffer } from '@/hooks/useFileEncryption';
 import EncryptionSetupModal from './EncryptionSetupModal';
-import EncryptionRecoveryModal from './EncryptionRecoveryModal';
-
-// Set by the sign-in page's "recover my encrypted files" action — the only
-// legitimate way the recovery modal is allowed to appear. Never set this
-// anywhere else.
-export const DEK_RECOVERY_REQUESTED_KEY = 'storeit_dek_recovery_requested';
 
 // /share/** is a public, token-authenticated route with its own independent
 // session system (see server/lib/shareSession.ts) — it must never touch the
@@ -38,12 +32,6 @@ type AuthContextValue = {
   // state updates immediately without a redundant extra round-trip.
   setAuthUser: (user: AuthUser) => void;
   logout: () => Promise<void>;
-  // Called by the sign-in page's explicit "I have a recovery code" action —
-  // the only place this should ever be called from. Arms the recovery
-  // modal for the next time a user is authenticated (immediately, if
-  // already logged in; otherwise once the in-progress login completes,
-  // surviving a full-page OAuth redirect via sessionStorage).
-  requestDekRecovery: () => void;
 };
 
 const AuthContext = createContext<AuthContextValue>({
@@ -52,7 +40,6 @@ const AuthContext = createContext<AuthContextValue>({
   isAuthenticated: false,
   setAuthUser: () => {},
   logout: async () => {},
-  requestDekRecovery: () => {},
 });
 
 export function useAuth() {
@@ -64,7 +51,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const exempt = isExemptFromSessionBootstrap(pathname);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isReady, setIsReady] = useState(false);
-  const [dekModal, setDekModal] = useState<'setup' | 'recovery' | null>(null);
+  const [dekModal, setDekModal] = useState<'setup' | null>(null);
   const [dekBootstrappedFor, setDekBootstrappedFor] = useState<string | null>(null);
 
   // Set for the duration of an explicit logout so the 10-minute silent
@@ -99,18 +86,6 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       return false;
     }
-  }, []);
-
-  const [dekRecoveryTrigger, setDekRecoveryTrigger] = useState(0);
-
-  const requestDekRecovery = useCallback(() => {
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem(DEK_RECOVERY_REQUESTED_KEY, '1');
-    }
-    // Bumps the DEK-bootstrap effect's dependency so an already-logged-in
-    // user (rare on the sign-in page, but possible) gets the modal
-    // immediately instead of waiting on some unrelated state change.
-    setDekRecoveryTrigger((n) => n + 1);
   }, []);
 
   useEffect(() => {
@@ -157,18 +132,15 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   // Bootstrap the session DEK once a user is authenticated — works the same
   // regardless of login method (credentials, Google, Telegram), since it
   // never depends on a password. A known device unlocks silently from its
-  // local store. An unknown device (recovery code needed) never auto-shows
-  // a modal for it — that's only reachable via the sign-in page's explicit
-  // "recover my encrypted files" action (DEK_RECOVERY_REQUESTED_KEY), which
-  // a brand-new-encryption account also skips since there's nothing to
-  // recover yet, so 'setup' still opens automatically for those.
+  // local store. An unknown device with an account that already has
+  // encryption set up is left alone here — recovery is exclusively reached
+  // through the sign-in page's "Forgot password" form (Authform.tsx), which
+  // signs the user in AND unlocks the DEK in one submit via
+  // /api/auth/recover + client/lib/dek.ts's unlockDeviceDEK. A brand-new
+  // account with no encryption at all still gets 'setup' automatically.
   useEffect(() => {
     if (!isReady || !user || exempt) return;
-
-    const recoveryRequested = typeof window !== 'undefined'
-      && sessionStorage.getItem(DEK_RECOVERY_REQUESTED_KEY) === '1';
-
-    if (dekBootstrappedFor === user.userId && !recoveryRequested) return;
+    if (dekBootstrappedFor === user.userId) return;
 
     let cancelled = false;
 
@@ -181,7 +153,6 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
             setSessionDEK(dek);
             setDekBootstrappedFor(user.userId);
           }
-          if (recoveryRequested) sessionStorage.removeItem(DEK_RECOVERY_REQUESTED_KEY);
           return;
         }
 
@@ -189,12 +160,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         const data = res.ok ? await res.json() : { hasEncryption: false };
         if (cancelled) return;
 
-        if (recoveryRequested) {
-          sessionStorage.removeItem(DEK_RECOVERY_REQUESTED_KEY);
-          setDekModal(data.hasEncryption ? 'recovery' : null);
-        } else if (!data.hasEncryption) {
-          setDekModal('setup');
-        }
+        if (!data.hasEncryption) setDekModal('setup');
         setDekBootstrappedFor(user.userId);
       } catch {
         if (!cancelled) setDekBootstrappedFor(user.userId);
@@ -202,20 +168,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     })();
 
     return () => { cancelled = true; };
-  }, [isReady, user, dekBootstrappedFor, exempt, dekRecoveryTrigger]);
+  }, [isReady, user, dekBootstrappedFor, exempt]);
 
   return (
-    <AuthContext.Provider value={{ user, isReady, isAuthenticated: !!user, setAuthUser, logout, requestDekRecovery }}>
+    <AuthContext.Provider value={{ user, isReady, isAuthenticated: !!user, setAuthUser, logout }}>
       {children}
       {dekModal === 'setup' && user && (
         <EncryptionSetupModal userId={user.userId} onComplete={() => setDekModal(null)} />
-      )}
-      {dekModal === 'recovery' && user && (
-        <EncryptionRecoveryModal
-          userId={user.userId}
-          onComplete={() => setDekModal(null)}
-          onSkip={() => setDekModal(null)}
-        />
       )}
     </AuthContext.Provider>
   );

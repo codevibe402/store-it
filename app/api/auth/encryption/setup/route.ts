@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import { getAuthUser } from "@/server/auth/auth";
 import connectDB from "@/adapters/database/mongoose";
 import User from "@/adapters/database/models/User";
@@ -8,14 +9,15 @@ export async function POST(req: NextRequest) {
   if (!user?.userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => null);
-  const { recoveryWrapped, recoveryNonce, recoverySalt } = body as {
+  const { recoveryWrapped, recoveryNonce, recoverySalt, recoveryCode } = body as {
     recoveryWrapped?: string;
     recoveryNonce?: string;
     recoverySalt?: string;
+    recoveryCode?: string;
   } ?? {};
 
-  if (!recoveryWrapped || !recoveryNonce || !recoverySalt) {
-    return NextResponse.json({ error: "recoveryWrapped, recoveryNonce, and recoverySalt are required" }, { status: 400 });
+  if (!recoveryWrapped || !recoveryNonce || !recoverySalt || !recoveryCode) {
+    return NextResponse.json({ error: "recoveryWrapped, recoveryNonce, recoverySalt, and recoveryCode are required" }, { status: 400 });
   }
 
   await connectDB();
@@ -33,6 +35,11 @@ export async function POST(req: NextRequest) {
   doc.encryptionRecoveryWrapped = recoveryWrapped;
   doc.encryptionRecoveryNonce = recoveryNonce;
   doc.encryptionRecoverySalt = recoverySalt;
+  // Hashed the same way `password` is — the plaintext code is only ever seen
+  // here, once, and never stored. Lets server/auth/recovery.ts verify a
+  // recovery-code login without needing the (deliberately unverifiable)
+  // DEK-unwrap step to succeed first.
+  doc.encryptionRecoveryCodeHash = await bcrypt.hash(recoveryCode, 10);
   doc.encryptionSetupAt = new Date();
   await doc.save();
 

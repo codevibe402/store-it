@@ -42,6 +42,7 @@ export default function EncryptionSetupModal({ userId, onComplete }: EncryptionS
             recoveryWrapped: wrapped.ciphertext,
             recoveryNonce: wrapped.nonce,
             recoverySalt: bufferToBase64(salt),
+            recoveryCode: normalizeRecoveryCode(code),
           }),
         });
         if (!res.ok) throw new Error("Failed to set up encryption");

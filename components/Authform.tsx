@@ -29,6 +29,7 @@ import { Input } from "./ui/input"
 import { sanitizeEmail, sanitizeUsername, sanitizePassword } from "@/shared/security"
 import { TelegramLoginButton } from "./TelegramLoginButton"
 import { useAuth } from "./AuthProvider"
+import { unlockDeviceDEK } from "@/client/lib/dek"
 
 type FormType = "sign-up" | "sign-in"
 
@@ -51,10 +52,12 @@ const signUpSchema = z.object({
 
 const Authform = () => {
     const router = useRouter()
-  const { isAuthenticated, requestDekRecovery, setAuthUser } = useAuth()
+  const { setAuthUser } = useAuth()
   const [type, setType] = React.useState<FormType>("sign-in")
   const [showForgotPassword, setShowForgotPassword] = React.useState(false)
-  const [recoveryArmed, setRecoveryArmed] = React.useState(false)
+  const [recoveryEmail, setRecoveryEmail] = React.useState("")
+  const [recoveryCode, setRecoveryCode] = React.useState("")
+  const [recoverySubmitting, setRecoverySubmitting] = React.useState(false)
 
   const schema = type === "sign-up" ? signUpSchema : signInSchema
 
@@ -132,13 +135,45 @@ async function onSubmit(data: FormValues) {
   setType(newType)
 }
 
-  const handleRecoverFiles = () => {
-    requestDekRecovery()
-    setRecoveryArmed(true)
-    if (isAuthenticated) {
-      toast.success("Opening the recovery prompt…")
-    } else {
-      toast.success("Got it — sign in normally, and we'll ask for your recovery code right after.")
+  async function handleRecoverySubmit() {
+    const safeEmail = sanitizeEmail(recoveryEmail)
+    if (!safeEmail || !recoveryCode.trim()) {
+      toast.error("Enter your email and recovery code")
+      return
+    }
+
+    setRecoverySubmitting(true)
+    try {
+      const res = await fetch("/api/auth/recover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: safeEmail, recoveryCode }),
+      })
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        toast.error(data.error || "Invalid email or recovery code")
+        return
+      }
+
+      // Signs the user in (this endpoint mints a real session, same as
+      // /api/auth/login) and separately unwraps this account's DEK for use
+      // on this device — the two are independent outcomes of one submit.
+      setAuthUser(data.user)
+      try {
+        await unlockDeviceDEK(data.user.userId, recoveryCode, data)
+      } catch {
+        toast.error("Signed in, but that recovery code doesn't match this account's files.")
+        router.push("/dashboard")
+        return
+      }
+
+      toast.success("Signed in and unlocked your files.")
+      router.push("/dashboard")
+    } catch {
+      toast.error("Something went wrong")
+    } finally {
+      setRecoverySubmitting(false)
     }
   }
 
@@ -282,28 +317,35 @@ async function onSubmit(data: FormValues) {
             </button>
             {showForgotPassword && (
               <div className="mt-3 rounded-lg border bg-muted/40 p-3 text-xs">
-                {recoveryArmed ? (
-                  <p className="text-muted-foreground">
-                    {isAuthenticated
-                      ? "Check for the recovery prompt now."
-                      : "Sign in above — we'll ask for your recovery code right after."}
-                  </p>
-                ) : (
-                  <>
-                    <p className="text-muted-foreground">
-                      Resetting your password doesn&apos;t affect encrypted files — those are
-                      unlocked separately, with the recovery code you saved when encryption was
-                      first set up.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleRecoverFiles}
-                      className="mt-2 w-full rounded-md border bg-background py-1.5 font-medium hover:bg-accent"
-                    >
-                      I have my recovery code — unlock my encrypted files
-                    </button>
-                  </>
-                )}
+                <p className="text-muted-foreground">
+                  Sign in with your account email and the recovery code you saved when encryption
+                  was first set up — this signs you in and unlocks your encrypted files, no
+                  password needed.
+                </p>
+                <div className="mt-2 flex flex-col gap-2">
+                  <Input
+                    value={recoveryEmail}
+                    onChange={(e) => setRecoveryEmail(e.target.value)}
+                    placeholder="Account email"
+                    autoComplete="off"
+                    className="h-8 text-xs"
+                  />
+                  <Input
+                    value={recoveryCode}
+                    onChange={(e) => setRecoveryCode(e.target.value)}
+                    placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+                    autoComplete="off"
+                    className="h-8 text-xs"
+                  />
+                  <button
+                    type="button"
+                    disabled={recoverySubmitting}
+                    onClick={handleRecoverySubmit}
+                    className="w-full rounded-md border bg-background py-1.5 font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {recoverySubmitting ? "Verifying…" : "Sign in with recovery code"}
+                  </button>
+                </div>
               </div>
             )}
           </div>

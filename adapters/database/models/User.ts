@@ -28,6 +28,10 @@ const UserSchema = new mongoose.Schema({
   encryptionRecoveryNonce:   { type: String, default: null },
   encryptionRecoverySalt:    { type: String, default: null },
   encryptionSetupAt:         { type: Date, default: null },
+  // Bcrypt hash of the recovery code, set once at encryption setup — lets
+  // the server verify a recovery-code login (server/auth/recovery.ts)
+  // without ever storing the code itself, same trust model as `password`.
+  encryptionRecoveryCodeHash: { type: String, select: false, default: null },
 });
 
 
